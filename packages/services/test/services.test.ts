@@ -76,7 +76,7 @@ describe('CheckService (live provider, no credentials)', () => {
       userAgent: 'test',
       robots: { isAllowed: async () => false },
     };
-    const { deps } = makeDeps({ registry: createLiveRegistry(live, (s) => (s === 'instagram' ? require_ig() : undefined)) });
+    const { deps } = makeDeps({ registry: createLiveRegistry(live, (s) => (s === 'instagram' ? instagramConfig() : undefined)) });
     const r = await new CheckService(deps).runCheck(ctx(), { input: 'Acme Robotics', includeAlternatives: false });
     expect(r.simulated).toBe(false);
     const cells = Object.values(r.primary.cells).filter((c) => c !== null);
@@ -87,7 +87,7 @@ describe('CheckService (live provider, no credentials)', () => {
     expect(r.recommendation).toBeNull();
   });
 });
-const require_ig = () => PLATFORM_CATALOG.find((p) => p.slug === 'instagram');
+const instagramConfig = () => PLATFORM_CATALOG.find((p) => p.slug === 'instagram');
 
 async function seedCheck(deps: ReturnType<typeof makeDeps>['deps']) {
   return new CheckService(deps).runCheck(ctx(), { input: 'Acme Robotics', requestedHandle: 'acmerobotics', includeAlternatives: true });

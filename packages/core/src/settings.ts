@@ -60,5 +60,15 @@ export function loadSettings(env: Record<string, string | undefined> = process.e
   return parsed.data;
 }
 
-/** Development-only fallback secret. Refused in production by AppSettingsSchema. */
-export const DEV_SESSION_SECRET = 'dev-only-insecure-session-secret-change-me-0000';
+/**
+ * Session signing secret. Production requires SESSION_SECRET (enforced above);
+ * elsewhere an unset secret falls back to a random per-process value, so dev
+ * sessions simply end when the server restarts. No secret literal is shipped.
+ */
+let ephemeralSecret: string | null = null;
+export function resolveSessionSecret(settings: Pick<AppSettings, 'SESSION_SECRET' | 'APP_ENV'>): string {
+  if (settings.SESSION_SECRET) return settings.SESSION_SECRET;
+  if (settings.APP_ENV === 'production') throw new Error('SESSION_SECRET is required in production');
+  ephemeralSecret ??= globalThis.crypto.getRandomValues(new Uint8Array(32)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+  return ephemeralSecret;
+}

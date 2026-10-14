@@ -66,3 +66,14 @@ describe('settings', () => {
     expect(() => loadSettings({ APP_ENV: 'production', AUTH_MODE: 'supabase', AVAILABILITY_PROVIDER_MODE: 'mock', SESSION_SECRET: 'x'.repeat(40) })).toThrow(/mock is not allowed/);
   });
 });
+
+describe('resolveSessionSecret', () => {
+  it('uses SESSION_SECRET when set, a stable random value in dev, and throws in production', async () => {
+    const { resolveSessionSecret } = await import('../src');
+    expect(resolveSessionSecret({ SESSION_SECRET: 'x'.repeat(40), APP_ENV: 'development' })).toBe('x'.repeat(40));
+    const a = resolveSessionSecret({ SESSION_SECRET: undefined, APP_ENV: 'development' });
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(resolveSessionSecret({ SESSION_SECRET: undefined, APP_ENV: 'test' })).toBe(a);
+    expect(() => resolveSessionSecret({ SESSION_SECRET: undefined, APP_ENV: 'production' })).toThrow(/required/);
+  });
+});

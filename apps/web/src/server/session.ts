@@ -2,7 +2,7 @@ import 'server-only';
 import { randomBytes } from 'node:crypto';
 import { jwtVerify, SignJWT, createRemoteJWKSet } from 'jose';
 import { cookies } from 'next/headers';
-import { DEV_SESSION_SECRET, type Role } from '@sha/core';
+import { resolveSessionSecret, type Role } from '@sha/core';
 import { runtime } from './runtime';
 
 export const SESSION_COOKIE = 'sha_session';
@@ -18,8 +18,7 @@ export interface Session {
 }
 
 function secret(): Uint8Array {
-  const s = runtime().settings.SESSION_SECRET ?? DEV_SESSION_SECRET; // dev fallback refused in production by settings
-  return new TextEncoder().encode(s);
+  return new TextEncoder().encode(resolveSessionSecret(runtime().settings));
 }
 
 export async function issueSession(identity: Omit<Session, 'csrf'>): Promise<Session> {

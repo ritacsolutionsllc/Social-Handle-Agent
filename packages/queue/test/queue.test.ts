@@ -51,3 +51,9 @@ describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
     await conn.quit();
   });
 });
+
+describe('InlineDispatcher misuse', () => {
+  it('rejects enqueue before bind() in the caller instead of an unhandled rejection', async () => {
+    await expect(new InlineDispatcher(silent).enqueue({ workspaceId: 'w', jobId: 'j' })).rejects.toThrow(/before bind/);
+  });
+});

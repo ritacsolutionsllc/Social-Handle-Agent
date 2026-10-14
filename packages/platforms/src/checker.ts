@@ -1,6 +1,6 @@
 import type { AvailabilityResult, PlatformConfig } from '@sha/core';
 import type { KeyValueCache } from './cache';
-import { fromError, makeResult, unknown } from './adapters/result';
+import { fromError, makeResult, unknownResult } from './adapters/result';
 import type { AdapterRegistry } from './registry';
 import { noopLogger, type Logger } from './types';
 import { backoffDelay, Semaphore, sleep } from './util';
@@ -71,7 +71,7 @@ export class AvailabilityChecker {
 
     const adapter = this.deps.registry.get(platform.adapterKey);
     if (!adapter) {
-      return unknown(platform, handle, this.now(), 'none', 'unsupported', `No ${this.mode} adapter is registered for "${platform.adapterKey}".`);
+      return unknownResult(platform, handle, this.now(), 'none', 'unsupported', `No ${this.mode} adapter is registered for "${platform.adapterKey}".`);
     }
 
     let releaseGlobal: (() => void) | undefined;

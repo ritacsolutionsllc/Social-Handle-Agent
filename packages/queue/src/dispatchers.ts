@@ -41,6 +41,8 @@ export class InlineDispatcher implements JobDispatcher {
   }
 
   async enqueue(ref: JobRef) {
+    // Fail fast in the caller's await, not as an unhandled rejection later.
+    if (!this.process) throw new Error('InlineDispatcher used before bind()');
     const run = this.run(ref, 1).finally(() => this.pending.delete(run));
     this.pending.add(run);
   }
@@ -51,10 +53,9 @@ export class InlineDispatcher implements JobDispatcher {
   }
 
   private async run(ref: JobRef, attempt: number): Promise<void> {
-    await new Promise((r) => setImmediate(r));
-    if (!this.process) throw new Error('InlineDispatcher used before bind()');
     try {
-      await this.process(ref);
+      await new Promise((r) => setImmediate(r));
+      await this.process!(ref);
     } catch (err) {
       if (err instanceof RetryableJobError && attempt < this.attempts) {
         await new Promise((r) => setTimeout(r, this.baseDelayMs * 2 ** (attempt - 1)));

@@ -1,7 +1,7 @@
 import type { AvailabilityResult, PlatformConfig } from '@sha/core';
 import type { AvailabilityAdapter, CheckOptions, LiveAdapterDeps } from '../types';
 import { withTimeout } from '../util';
-import { escapeRegex, fromError, interpretNonDefinitive, makeResult, missingCredentials, probe, rateLimited, unknown } from './result';
+import { escapeRegex, fromError, interpretNonDefinitive, makeResult, missingCredentials, probe, rateLimited, unknownResult } from './result';
 
 /**
  * Live adapters. Each documents the ENTITY it checks and the METHOD it uses.
@@ -54,7 +54,7 @@ export class XAvailabilityAdapter extends LiveAdapter {
         evidence: 'API reports no active user. Suspended, deactivated and reserved names look identical, so registration is not guaranteed.',
       });
     }
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', `Unexpected API response (HTTP ${res.status}).`);
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', `Unexpected API response (HTTP ${res.status}).`);
   }
 }
 
@@ -82,7 +82,7 @@ export class InstagramAvailabilityAdapter extends LiveAdapter {
       return makeResult(p, handle, this.now, { status: 'taken', confidence: 'high', source: this.source, evidence: 'A Business/Creator account uses this username.' });
     }
     if (body.error?.code === 4 || body.error?.code === 17 || body.error?.code === 32) return rateLimited(p, handle, this.now, this.source, res);
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', 'No Business/Creator account found. Personal accounts are invisible to this API, so availability cannot be confirmed.');
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', 'No Business/Creator account found. Personal accounts are invisible to this API, so availability cannot be confirmed.');
   }
 }
 
@@ -91,7 +91,7 @@ export class FacebookAvailabilityAdapter extends LiveAdapter {
   readonly key = 'facebook';
   protected readonly source = 'manual_only';
   protected async run(handle: string, p: PlatformConfig) {
-    return unknown(p, handle, this.now, this.source, 'unsupported', 'Meta exposes no username availability API and prohibits automated collection. Check while creating the Page.');
+    return unknownResult(p, handle, this.now, this.source, 'unsupported', 'Meta exposes no username availability API and prohibits automated collection. Check while creating the Page.');
   }
 }
 
@@ -100,7 +100,7 @@ export class LinkedInAvailabilityAdapter extends LiveAdapter {
   readonly key = 'linkedin';
   protected readonly source = 'manual_only';
   protected async run(handle: string, p: PlatformConfig) {
-    return unknown(p, handle, this.now, this.source, 'unsupported', 'LinkedIn exposes no URL availability API and prohibits scraping. The Page setup form validates the URL.');
+    return unknownResult(p, handle, this.now, this.source, 'unsupported', 'LinkedIn exposes no URL availability API and prohibits scraping. The Page setup form validates the URL.');
   }
 }
 
@@ -123,7 +123,7 @@ export class TikTokAvailabilityAdapter extends LiveAdapter {
         evidence: 'Profile page reports "user not found" (10221). Banned or reserved names can still be unclaimable.',
       });
     }
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', `Profile page (HTTP ${out.status}) had no recognised markers.`);
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', `Profile page (HTTP ${out.status}) had no recognised markers.`);
   }
 }
 
@@ -173,7 +173,7 @@ export class YouTubeAvailabilityAdapter extends LiveAdapter {
         evidence: 'No public channel page (HTTP 404). Set YOUTUBE_API_KEY for a stronger check; a missing page does not prove the handle is claimable.',
       });
     }
-    return unknown(p, handle, this.now, source, 'ambiguous_response', `Unexpected HTTP ${out.status}.`);
+    return unknownResult(p, handle, this.now, source, 'ambiguous_response', `Unexpected HTTP ${out.status}.`);
   }
 }
 
@@ -191,7 +191,7 @@ export class PinterestAvailabilityAdapter extends LiveAdapter {
     if (out.status === 404) {
       return makeResult(p, handle, this.now, { status: 'available', confidence: 'low', source: this.source, evidence: 'Profile page returned HTTP 404; not proof the username is registrable.' });
     }
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', `Profile page (HTTP ${out.status}) had no recognised markers.`);
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', `Profile page (HTTP ${out.status}) had no recognised markers.`);
   }
 }
 
@@ -218,7 +218,7 @@ export class RedditAvailabilityAdapter extends LiveAdapter {
     const body: unknown = await res.json().catch(() => null);
     if (body === true) return makeResult(p, handle, this.now, { status: 'available', confidence: 'high', source: this.source, evidence: 'Reddit API reports the username is available.' });
     if (body === false) return makeResult(p, handle, this.now, { status: 'taken', confidence: 'high', source: this.source, evidence: 'Reddit API reports the username is not available.' });
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', 'Unexpected API body.');
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', 'Unexpected API body.');
   }
 
   private async getToken(id: string, secret: string, ua: string, signal: AbortSignal, timeoutMs: number): Promise<string | null> {
@@ -252,7 +252,7 @@ export class SnapchatAvailabilityAdapter extends LiveAdapter {
     if (out.status === 200 && new RegExp(`"username"\\s*:\\s*"${escapeRegex(handle)}"`, 'i').test(out.body)) {
       return makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source: this.source, evidence: 'Public profile page exists.' });
     }
-    return unknown(p, handle, this.now, this.source, 'ambiguous_response', 'No public profile found. Private accounts are not visible, so availability cannot be confirmed.');
+    return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', 'No public profile found. Private accounts are not visible, so availability cannot be confirmed.');
   }
 }
 
@@ -268,11 +268,11 @@ export class ThreadsAvailabilityAdapter extends LiveAdapter {
   }
   protected async run(handle: string, p: PlatformConfig, opts: CheckOptions) {
     const ig = this.instagramConfig();
-    if (!ig) return unknown(p, handle, this.now, this.source, 'derived_unknown', 'Instagram platform config missing; cannot derive.');
+    if (!ig) return unknownResult(p, handle, this.now, this.source, 'derived_unknown', 'Instagram platform config missing; cannot derive.');
     const r = await this.instagram.check(handle, ig, opts);
     if (r.status === 'taken') {
       return makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source: this.source, evidence: 'The Instagram username is taken, so this Threads handle belongs to that account.' });
     }
-    return unknown(p, handle, this.now, this.source, 'derived_unknown', `Follows Instagram (${r.status}). Claim the Instagram username first; Threads inherits it.`);
+    return unknownResult(p, handle, this.now, this.source, 'derived_unknown', `Follows Instagram (${r.status}). Claim the Instagram username first; Threads inherits it.`);
   }
 }

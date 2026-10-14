@@ -10,11 +10,11 @@ export function makeResult(platform: PlatformConfig, handle: string, now: Date, 
   return r;
 }
 
-export const unknown = (platform: PlatformConfig, handle: string, now: Date, source: string, reason: AvailabilityResult['reason'], evidence: string) =>
+export const unknownResult = (platform: PlatformConfig, handle: string, now: Date, source: string, reason: AvailabilityResult['reason'], evidence: string) =>
   makeResult(platform, handle, now, { status: 'unknown', confidence: 'low', source, reason, evidence });
 
 export const missingCredentials = (platform: PlatformConfig, handle: string, now: Date, source: string, names: string[]) =>
-  unknown(platform, handle, now, source, 'missing_credentials', `Live check not configured: set ${names.join(', ')} on the server. No result was simulated.`);
+  unknownResult(platform, handle, now, source, 'missing_credentials', `Live check not configured: set ${names.join(', ')} on the server. No result was simulated.`);
 
 /** Convert thrown errors into normalized results. Never includes URLs (they may carry tokens). */
 export function fromError(platform: PlatformConfig, handle: string, now: Date, source: string, err: unknown): AvailabilityResult {
@@ -60,15 +60,15 @@ export async function probe(deps: LiveAdapterDeps, url: string, signal: AbortSig
 /** Shared handling for responses that are never definitive. Returns null if the adapter should decide. */
 export function interpretNonDefinitive(platform: PlatformConfig, handle: string, now: Date, source: string, p: ProbeOutcome): AvailabilityResult | null {
   if (p.kind === 'robots_disallowed') {
-    return unknown(platform, handle, now, source, 'robots_disallowed', 'robots.txt disallows automated access to this profile path; not checked.');
+    return unknownResult(platform, handle, now, source, 'robots_disallowed', 'robots.txt disallows automated access to this profile path; not checked.');
   }
   if (p.status === 429) return rateLimited(platform, handle, now, source, p.res);
   if (p.status >= 300 && p.status < 400) {
     const where = p.location ? safeLocation(p.location) : 'unknown location';
-    return unknown(platform, handle, now, source, 'ambiguous_response', `Redirected (HTTP ${p.status}) to ${where}; a redirect or login wall is not proof of availability.`);
+    return unknownResult(platform, handle, now, source, 'ambiguous_response', `Redirected (HTTP ${p.status}) to ${where}; a redirect or login wall is not proof of availability.`);
   }
   if (p.status === 403 || p.status === 401 || BOT_MARKERS.some((m) => m.test(p.body))) {
-    return unknown(platform, handle, now, source, 'bot_protection', `Blocked by login wall or bot protection (HTTP ${p.status}).`);
+    return unknownResult(platform, handle, now, source, 'bot_protection', `Blocked by login wall or bot protection (HTTP ${p.status}).`);
   }
   if (p.status >= 500) {
     return makeResult(platform, handle, now, { status: 'error', confidence: 'low', source, reason: 'upstream_error', error: `Platform returned HTTP ${p.status}.` });

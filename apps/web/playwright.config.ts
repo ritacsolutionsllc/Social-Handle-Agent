@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
@@ -10,6 +11,9 @@ if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('E2E needs TEST_DATABASE_URL (or DATABASE_URL); run `npm run db:setup` first.');
 
+// Fresh random secret per E2E run; never a committed literal.
+const e2eSessionSecret = randomBytes(32).toString('base64url');
+
 const serverEnv = (creationEnabled: boolean): Record<string, string> => ({
   NODE_ENV: 'production',
   APP_ENV: 'test',
@@ -19,7 +23,7 @@ const serverEnv = (creationEnabled: boolean): Record<string, string> => ({
   QUEUE_DRIVER: 'inline',
   CACHE_DRIVER: 'memory',
   DATABASE_URL: databaseUrl,
-  SESSION_SECRET: 'e2e-only-session-secret-not-for-real-use-000000',
+  SESSION_SECRET: e2eSessionSecret,
 });
 
 // Optional: point at a preinstalled Chromium when its revision differs from this Playwright version.
