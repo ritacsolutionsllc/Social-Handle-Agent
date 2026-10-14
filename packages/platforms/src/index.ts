@@ -1,0 +1,9 @@
+export * from './types';
+export * from './util';
+export * from './robots';
+export * from './cache';
+export * from './checker';
+export * from './registry';
+export * from './adapters/live';
+export { MockAvailabilityAdapter, MOCK_FIXTURES } from './adapters/mock';
+export { makeResult } from './adapters/result';
