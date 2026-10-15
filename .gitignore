@@ -1,0 +1,19 @@
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+playwright-report/
+test-results/
+# Private environment files — only .env.example is committed.
+.env
+.env.*
+!.env.example
+
+# Local tooling state (plugins/agents); never commit
+.cto-toolkit/
+.claude/settings.local.json
+# Redis snapshots written when redis-server runs in this directory
+dump.rdb
+*.rdb

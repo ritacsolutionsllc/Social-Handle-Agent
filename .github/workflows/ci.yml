@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only reads the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build, E2E
+    # Pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19; bump deliberately after verifying.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+          # Ephemeral, network-isolated CI container: trust auth means no password is committed.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Same safe defaults as development: mock provider, account creation off.
+    # Nothing in CI contacts a social platform or creates an account.
+    env:
+      APP_ENV: test
+      AVAILABILITY_PROVIDER_MODE: mock
+      ACCOUNT_CREATION_ENABLED: 'false'
+      AUTH_MODE: dev
+      ADMIN_DATABASE_URL: postgres://postgres@localhost:5432/postgres
+      MIGRATION_DATABASE_URL: postgres://postgres@localhost:5432/social_handle_agent
+      TEST_MIGRATION_DATABASE_URL: postgres://postgres@localhost:5432/social_handle_agent_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Generate per-run database credentials
+        run: |
+          pw="$(openssl rand -hex 16)"
+          echo "::add-mask::$pw"
+          {
+            echo "APP_DB_PASSWORD=$pw"
+            echo "DATABASE_URL=postgres://sha_app_login:$pw@localhost:5432/social_handle_agent"
+            echo "TEST_DATABASE_URL=postgres://sha_app_login:$pw@localhost:5432/social_handle_agent_test"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up databases (roles, migrations, seed)
+        run: |
+          npm run db:bootstrap
+          npm run db:migrate
+          npm run db:seed
+          npx tsx packages/db/src/cli/migrate.ts --test
+          npx tsx packages/db/src/cli/seed.ts --test
+
+      - name: Unit + integration tests (incl. RLS isolation and BullMQ)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (mock provider)
+        working-directory: apps/web
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
