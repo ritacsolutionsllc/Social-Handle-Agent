@@ -56,7 +56,7 @@ test('pages carry the runtime CSP (no wildcard Supabase egress)', async ({ reque
   const csp = res.headers()['content-security-policy'] ?? '';
   expect(csp).toContain("default-src 'self'");
   expect(csp).toContain("frame-ancestors 'none'");
-  expect(csp).toMatch(/connect-src 'self'(;|$)/); // SUPABASE_URL unset in E2E
+  expect(csp).toMatch(/connect-src 'self'(?: [^;]+)?(;|$)/); // plus SUPABASE_URL's origin if configured
   expect(csp).not.toContain('*');
   expect(res.headers()['x-frame-options']).toBe('DENY');
 });

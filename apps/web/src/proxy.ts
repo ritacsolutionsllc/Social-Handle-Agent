@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -17,15 +17,18 @@ function supabaseOrigin(): string | null {
  * 'unsafe-inline' for styles is required by Next's runtime style tags; 'unsafe-eval'
  * only in dev for React Refresh.
  */
-function contentSecurityPolicy(): string {
+function contentSecurityPolicy(host: string | null): string {
   const supabase = supabaseOrigin();
+  // Dev only: Next's HMR WebSocket; not every browser matches ws:// against 'self'.
+  // Host is client-supplied, so only a plain host[:port] is allowed into the header.
+  const hmr = isDev && host && /^[\w.\-[\]:]+$/.test(host) ? ` ws://${host}` : '';
   return [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
-    `connect-src 'self'${supabase ? ` ${supabase}` : ''}`,
+    `connect-src 'self'${hmr}${supabase ? ` ${supabase}` : ''}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -33,9 +36,9 @@ function contentSecurityPolicy(): string {
   ].join('; ');
 }
 
-export function proxy() {
+export function proxy(request: NextRequest) {
   const res = NextResponse.next();
-  res.headers.set('Content-Security-Policy', contentSecurityPolicy());
+  res.headers.set('Content-Security-Policy', contentSecurityPolicy(request.headers.get('host')));
   return res;
 }
 

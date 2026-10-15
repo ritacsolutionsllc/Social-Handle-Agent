@@ -25,7 +25,7 @@ Defaults: `AVAILABILITY_PROVIDER_MODE=mock`, `ACCOUNT_CREATION_ENABLED=false`. M
 | `npm run db:migrate` / `db:seed` | Apply migrations / upsert platform catalog (`--test` targets the test DB) |
 | `npm run worker` | BullMQ worker (only with `QUEUE_DRIVER=bullmq`) |
 
-Test database: `npx tsx packages/db/src/cli/migrate.ts --test && npx tsx packages/db/src/cli/seed.ts --test`.
+Test database (after setting the `TEST_*` URLs): `npm run db:bootstrap && npx tsx packages/db/src/cli/migrate.ts --test && npx tsx packages/db/src/cli/seed.ts --test`.
 
 ## Continuous integration
 
