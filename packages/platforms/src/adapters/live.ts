@@ -165,9 +165,12 @@ export class YouTubeAvailabilityAdapter extends LiveAdapter {
     const nd = interpretNonDefinitive(p, handle, this.now, source, out);
     if (nd || out.kind !== 'response') return nd!;
     if (out.status === 200) {
-      const isChannel = /"channelId"\s*:\s*"UC[\w-]{10,}"|<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\//.test(out.body);
-      return isChannel
-        ? makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source, evidence: 'Public channel page with a channel ID exists (HTTP 200).' })
+      // Only markers describing the page itself count: an embedded channelId may belong to another channel.
+      const escaped = handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const ownCanonical = /<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/UC[\w-]{10,}"/.test(out.body);
+      const ownHandle = new RegExp(`"canonicalBaseUrl"\\s*:\\s*"\\/@${escaped}"`, 'i').test(out.body);
+      return ownCanonical || ownHandle
+        ? makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source, evidence: 'Public channel page for this handle exists (HTTP 200, canonical channel URL).' })
         : unknownResult(p, handle, this.now, source, 'ambiguous_response', 'HTTP 200 without channel markers (consent, login or error page); not proof of a channel.');
     }
     if (out.status === 404) {

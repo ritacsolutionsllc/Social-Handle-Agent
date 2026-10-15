@@ -126,7 +126,7 @@ describe.skipIf(!url)('Postgres repositories + row-level security (TEST_DATABASE
     // Bob's workspace context, but pointing at Alice's check: RLS passes, the FK must not.
     expect(
       await pgError(uow.run(bob.workspaceId, (r) => r.jobs.create({ checkId: aliceCheck.id, requestedBy: bob.userId, platform: 'reddit', handle: 'acme', email: 'b@example.test', providerMode: 'mock' }))),
-    ).toMatch(/foreign key|violates/);
+    ).toMatch(/violates foreign key constraint/);
   });
 
   it('enforces one active job per platform+handle and optimistic status updates', async () => {

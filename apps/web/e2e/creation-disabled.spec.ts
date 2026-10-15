@@ -50,3 +50,13 @@ test('unauthenticated users are redirected to login and API returns 401', async 
   const res = await page.request.post('/api/check', { data: { input: 'Acme' } });
   expect(res.status()).toBe(401);
 });
+
+test('pages carry the runtime CSP (no wildcard Supabase egress)', async ({ request }) => {
+  const res = await request.get('/login');
+  const csp = res.headers()['content-security-policy'] ?? '';
+  expect(csp).toContain("default-src 'self'");
+  expect(csp).toContain("frame-ancestors 'none'");
+  expect(csp).toMatch(/connect-src 'self'(;|$)/); // SUPABASE_URL unset in E2E
+  expect(csp).not.toContain('*');
+  expect(res.headers()['x-frame-options']).toBe('DENY');
+});

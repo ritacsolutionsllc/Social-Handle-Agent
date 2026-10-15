@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertTransition, canTransition, CheckRequestSchema, CreationJobsRequestSchema, loadSettings, PlatformConfigSchema, PLATFORM_CATALOG } from '../src';
+import { assertTransition, canTransition, CheckRequestSchema, CreationJobsRequestSchema, loadSettings, RecheckRequestSchema, PlatformConfigSchema, PLATFORM_CATALOG } from '../src';
 
 describe('job state machine', () => {
   it('allows the happy path', () => {
@@ -79,7 +79,7 @@ describe('resolveSessionSecret', () => {
 });
 
 describe('settings hardening', () => {
-  const ok = { SESSION_SECRET: 'x'.repeat(40), AUTH_MODE: 'supabase', SUPABASE_URL: 'https://p.supabase.co', SUPABASE_ANON_KEY: 'k' };
+  const ok = { SESSION_SECRET: 'x'.repeat(40), AUTH_MODE: 'supabase', SUPABASE_URL: 'https://p.supabase.co', SUPABASE_ANON_KEY: 'k', TRUSTED_PROXY_HOPS: '1' };
   it('rejects dev auth and missing secrets in staging', () => {
     expect(() => loadSettings({ APP_ENV: 'staging', AUTH_MODE: 'dev', SESSION_SECRET: 'x'.repeat(40) })).toThrow(/AUTH_MODE=dev is not allowed in staging/);
     expect(() => loadSettings({ ...ok, APP_ENV: 'staging', SESSION_SECRET: undefined })).toThrow(/SESSION_SECRET/);
@@ -89,7 +89,20 @@ describe('settings hardening', () => {
     expect(() => loadSettings({ ...ok, APP_ENV: 'production', AVAILABILITY_PROVIDER_MODE: 'live', SUPABASE_URL: 'http://p.supabase.co' })).toThrow(/https/);
     expect(loadSettings({ ...ok, APP_ENV: 'production', AVAILABILITY_PROVIDER_MODE: 'live' }).AUTH_MODE).toBe('supabase');
   });
-  it('accepts every generated candidate length in API handles', () => {
-    expect(CheckRequestSchema.safeParse({ input: 'a', requestedHandle: 'a'.repeat(108) }).success).toBe(true);
+  it('accepts every generated candidate length where handles come from a report', () => {
+    expect(RecheckRequestSchema.safeParse({ platform: 'x', handle: 'a'.repeat(108) }).success).toBe(true);
+  });
+  it('rejects a typed requestedHandle that canonicalize() would truncate', () => {
+    expect(CheckRequestSchema.safeParse({ input: 'a', requestedHandle: 'a'.repeat(100) }).success).toBe(true);
+    expect(CheckRequestSchema.safeParse({ input: 'a', requestedHandle: '@' + 'a'.repeat(100) }).success).toBe(true);
+    expect(CheckRequestSchema.safeParse({ input: 'a', requestedHandle: 'a'.repeat(101) }).success).toBe(false);
+  });
+  it('requires an explicit TRUSTED_PROXY_HOPS in shared environments only', () => {
+    expect(() => loadSettings({ ...ok, APP_ENV: 'staging', TRUSTED_PROXY_HOPS: undefined })).toThrow(/TRUSTED_PROXY_HOPS must be set/);
+    expect(loadSettings({ ...ok, APP_ENV: 'staging', TRUSTED_PROXY_HOPS: '0' }).TRUSTED_PROXY_HOPS).toBe(0);
+    expect(loadSettings({}).TRUSTED_PROXY_HOPS).toBe(0);
+  });
+  it('accepts an upper-case https scheme for SUPABASE_URL', () => {
+    expect(loadSettings({ ...ok, APP_ENV: 'production', AVAILABILITY_PROVIDER_MODE: 'live', SUPABASE_URL: 'HTTPS://p.supabase.co' }).AUTH_MODE).toBe('supabase');
   });
 });

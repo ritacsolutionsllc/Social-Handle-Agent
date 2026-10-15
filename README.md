@@ -45,7 +45,7 @@ See [`.env.example`](.env.example) for every variable with explanations. Key one
 | `MIGRATION_DATABASE_URL` / `ADMIN_DATABASE_URL` | — | Owner/admin roles used only by CLIs, never by the app. |
 | `QUEUE_DRIVER` / `CACHE_DRIVER` / `REDIS_URL` | `inline` / `memory` | Use `bullmq` + `redis` for durable jobs and shared cache/rate limits. |
 | `SESSION_SECRET` | random per process (dev only) | Required (32+ chars) in staging and production. |
-| `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies in front of the app; the client IP for rate limiting is read from that position in `X-Forwarded-For`. `0` ignores the (client-controlled) header. |
+| `TRUSTED_PROXY_HOPS` | `0` (dev/test); **required** in staging/production | Number of reverse proxies in front of the app; for N > 0, rate limiting uses the Nth `X-Forwarded-For` entry from the right. `0` ignores the client-controlled header and puts all callers in one IP rate-limit bucket (e.g. 10 sign-ins/min shared by everyone), so set it to your proxy count. |
 | Live adapter creds | unset | `X_BEARER_TOKEN`, `YOUTUBE_API_KEY`, `REDDIT_CLIENT_ID/SECRET/USER_AGENT`, `META_GRAPH_ACCESS_TOKEN` + `META_IG_BUSINESS_ACCOUNT_ID`. Server-only; never authorize registration. |
 
 ## Platforms: what is checked, how, and what is provisioned
@@ -115,4 +115,4 @@ Errors: `{ "error": { "code", "message", "details?" }, "requestId" }` with 400/4
 
 ## Deploying (requires explicit approval)
 
-Nothing here deploys automatically. For a real deployment: managed Postgres (Supabase works — run `db:bootstrap`'s role statements via SQL, then `db:migrate`), Redis, `APP_ENV=production`, `AUTH_MODE=supabase`, `AVAILABILITY_PROVIDER_MODE=live`, strong `SESSION_SECRET`, `QUEUE_DRIVER=bullmq`, `CACHE_DRIVER=redis`, and a separate `npm run worker` process. DB CLIs refuse production without `--confirm-production`.
+Nothing here deploys automatically. For a real deployment: managed Postgres (Supabase works — run `db:bootstrap`'s role statements via SQL, then `db:migrate`), Redis, `APP_ENV=production`, `AUTH_MODE=supabase`, `AVAILABILITY_PROVIDER_MODE=live`, strong `SESSION_SECRET`, `TRUSTED_PROXY_HOPS` (your reverse-proxy count), `QUEUE_DRIVER=bullmq`, `CACHE_DRIVER=redis`, and a separate `npm run worker` process. DB CLIs refuse production without `--confirm-production`.

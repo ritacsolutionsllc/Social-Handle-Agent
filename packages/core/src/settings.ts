@@ -27,8 +27,12 @@ export const AppSettingsSchema = z
     AVAILABILITY_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(3600).default(300),
     CHECK_DEADLINE_MS: z.coerce.number().int().min(1000).max(60_000).default(20_000),
     CHECK_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(8),
-    /** Reverse proxies in front of the app; the client IP is the Nth-from-right X-Forwarded-For entry. 0 = ignore the header. */
-    TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
+    /**
+     * Reverse proxies in front of the app; the client IP is the Nth-from-right X-Forwarded-For entry.
+     * 0 = ignore the header, which puts every caller in one IP rate-limit bucket. Must be set
+     * explicitly in staging/production so that trade-off is a deliberate choice.
+     */
+    TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
   })
   .transform((s) => {
     // APP_ENV is authoritative. If unset, NODE_ENV=production implies production (fail safe).
@@ -47,15 +51,18 @@ export const AppSettingsSchema = z
     if (shared && s.AUTH_MODE === 'dev') ctx.addIssue({ code: 'custom', message: `AUTH_MODE=dev is not allowed in ${s.APP_ENV}` });
     if (s.AUTH_MODE === 'supabase' && (!s.SUPABASE_URL || !s.SUPABASE_ANON_KEY))
       ctx.addIssue({ code: 'custom', message: 'AUTH_MODE=supabase requires SUPABASE_URL and SUPABASE_ANON_KEY' });
-    if (shared && s.SUPABASE_URL && !s.SUPABASE_URL.startsWith('https://'))
+    if (shared && s.SUPABASE_URL && new URL(s.SUPABASE_URL).protocol !== 'https:')
       ctx.addIssue({ code: 'custom', message: 'SUPABASE_URL must use https outside development' });
     if (prod && s.AVAILABILITY_PROVIDER_MODE === 'mock')
       ctx.addIssue({ code: 'custom', message: 'AVAILABILITY_PROVIDER_MODE=mock is not allowed in production' });
     if (shared && (!s.SESSION_SECRET || s.SESSION_SECRET.length < 32))
       ctx.addIssue({ code: 'custom', message: `SESSION_SECRET (32+ chars) is required in ${s.APP_ENV}` });
+    if (shared && s.TRUSTED_PROXY_HOPS === undefined)
+      ctx.addIssue({ code: 'custom', message: `TRUSTED_PROXY_HOPS must be set explicitly in ${s.APP_ENV} (0 = no proxy; all clients then share one IP rate-limit bucket)` });
     if (s.QUEUE_DRIVER === 'bullmq' && !s.REDIS_URL) ctx.addIssue({ code: 'custom', message: 'QUEUE_DRIVER=bullmq requires REDIS_URL' });
     if (s.CACHE_DRIVER === 'redis' && !s.REDIS_URL) ctx.addIssue({ code: 'custom', message: 'CACHE_DRIVER=redis requires REDIS_URL' });
-  });
+  })
+  .transform((s) => ({ ...s, TRUSTED_PROXY_HOPS: s.TRUSTED_PROXY_HOPS ?? 0 }));
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -69,8 +76,8 @@ export function loadSettings(env: Record<string, string | undefined> = process.e
 }
 
 /**
- * Session signing secret. Production requires SESSION_SECRET (enforced above);
- * elsewhere an unset secret falls back to a random per-process value, so dev
+ * Session signing secret. Staging and production require SESSION_SECRET (enforced above);
+ * in development and test an unset secret falls back to a random per-process value, so dev
  * sessions simply end when the server restarts. No secret literal is shipped.
  */
 let ephemeralSecret: string | null = null;

@@ -83,10 +83,19 @@ describe('YouTubeAvailabilityAdapter', () => {
     expect((await new YouTubeAvailabilityAdapter(deps(f, { YOUTUBE_API_KEY: 'k' })).check('acme', platform('youtube'), { signal: signal() })).status).toBe('rate_limited');
   });
   it('probe fallback: 200 → taken/medium, 404 → available/low', async () => {
-    const taken = fakeFetch([[/youtube\.com\/@acme/, () => html('<script>{"channelId":"UCabcdefghijklmnop"}</script>')]]);
+    const taken = fakeFetch([[/youtube\.com\/@acme/, () => html('<link rel="canonical" href="https://www.youtube.com/channel/UCabcdefghijklmnop">')]]);
     expect(await new YouTubeAvailabilityAdapter(deps(taken)).check('acme', platform('youtube'), { signal: signal() })).toMatchObject({ status: 'taken', confidence: 'medium', source: 'http_profile_probe' });
     const free = fakeFetch([[/youtube\.com\/@acme/, () => html('', 404)]]);
     expect(await new YouTubeAvailabilityAdapter(deps(free)).check('acme', platform('youtube'), { signal: signal() })).toMatchObject({ status: 'available', confidence: 'low' });
+  });
+  it('matches the page\'s own handle metadata, case-insensitively', async () => {
+    const f = fakeFetch([[/youtube\.com/, () => html('<script>{"canonicalBaseUrl":"/@Acme.Co"}</script>')]]);
+    expect(await new YouTubeAvailabilityAdapter(deps(f)).check('acme.co', platform('youtube'), { signal: signal() })).toMatchObject({ status: 'taken' });
+  });
+  it('an embedded channelId of some other channel is not proof the handle is taken', async () => {
+    const body = '<script>{"channelId":"UCabcdefghijklmnop","canonicalBaseUrl":"/@someoneelse"}</script>';
+    const f = fakeFetch([[/youtube\.com/, () => html(body)]]);
+    expect(await new YouTubeAvailabilityAdapter(deps(f)).check('acme', platform('youtube'), { signal: signal() })).toMatchObject({ status: 'unknown', reason: 'ambiguous_response' });
   });
   it('a bare HTTP 200 without channel markers is unknown, not taken', async () => {
     const f = fakeFetch([[/youtube\.com/, () => html('<html>Before you continue to YouTube</html>')]]);

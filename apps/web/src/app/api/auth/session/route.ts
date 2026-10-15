@@ -12,7 +12,10 @@ export const POST = route(
     const { accessToken } = await parseJson(req, SupabaseSessionSchema);
     const email = await verifySupabaseToken(accessToken).catch((err: unknown) => {
       // Token problems are the user's (401); JWKS outages or misconfiguration stay 5xx.
-      const tokenProblem = err instanceof errors.JOSEError && /^ERR_(JWT|JWS)_/.test(err.code);
+      // ALG_NOT_ALLOWED and JWKS_NO_MATCHING_KEY describe the token (bad alg / unknown kid);
+      // JWKS fetch failures and timeouts are ours and stay 5xx.
+      const tokenProblem =
+        err instanceof errors.JOSEError && (/^ERR_(JWT|JWS)_/.test(err.code) || err.code === 'ERR_JOSE_ALG_NOT_ALLOWED' || err.code === 'ERR_JWKS_NO_MATCHING_KEY');
       if (tokenProblem || (err instanceof Error && err.message === 'token has no email')) {
         throw new DomainError('unauthorized', 'Invalid or expired sign-in token.', 401);
       }

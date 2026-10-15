@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Redis } from 'ioredis';
-import { RetryableJobError, type ServiceDeps } from '@sha/services';
-import { BullMqDispatcher, InlineDispatcher, startCreationWorker } from '../src';
+import { Queue } from 'bullmq';
+import { RetryableJobError, RUNNING_LEASE_MS, type ServiceDeps } from '@sha/services';
+import { BullMqDispatcher, CREATION_QUEUE, InlineDispatcher, startCreationWorker } from '../src';
 
 const silent = { info() {}, warn() {}, error() {} };
 
@@ -47,6 +48,32 @@ describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
     expect(seen).toEqual(['job-a', 'job-a']);
     await worker.close();
     await dispatcher.close();
+    await conn.quit();
+  });
+
+  it('parks a delivery that finds the job running under a live lease until the lease expires', async () => {
+    const conn = new Redis(redisUrl!, { maxRetriesPerRequest: null });
+    await conn.flushdb();
+    const updatedAt = new Date().toISOString();
+    let reads = 0;
+    const deps = {
+      logger: silent,
+      uow: { run: async (_ws: string, fn: (r: unknown) => Promise<unknown>) => fn({ jobs: { get: async () => { reads++; return { id: 'job-r', status: 'running', updatedAt }; } } }) },
+    } as unknown as ServiceDeps;
+    const failed: string[] = [];
+    const worker = startCreationWorker(deps, conn, 1);
+    worker.on('failed', (_j, err) => failed.push(err.message));
+    const queue = new Queue(CREATION_QUEUE, { connection: conn });
+    await new BullMqDispatcher(conn, 3, silent).enqueue({ workspaceId: 'w', jobId: 'job-r' });
+    const deadline = Date.now() + 5000;
+    while ((await queue.getDelayedCount()) === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    const [parked] = await queue.getDelayed();
+    expect(reads).toBe(1);
+    expect(failed).toEqual([]);
+    expect(parked!.delay + parked!.timestamp).toBeGreaterThanOrEqual(new Date(updatedAt).getTime() + RUNNING_LEASE_MS);
+    await worker.close();
+    await queue.obliterate({ force: true });
+    await queue.close();
     await conn.quit();
   });
 });

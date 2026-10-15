@@ -10,8 +10,21 @@ export class FakeStore implements UnitOfWork {
   audit: Array<AuditEventInput & { workspaceId: string }> = [];
   observations: AvailabilityResult[] = [];
 
-  /** Transactional like the real UnitOfWork: all writes are rolled back if `fn` throws. */
-  async run<T>(ws: string, fn: (r: WorkspaceRepos) => Promise<T>): Promise<T> {
+  /** Tail of the run() queue: runs are serialized so a rollback can only undo its own writes. */
+  private lock: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Transactional like the real UnitOfWork: all writes are rolled back if `fn` throws.
+   * Runs are serialized (a stand-in for transaction isolation); nested run() calls would deadlock,
+   * which matches the real UoW where a nested transaction is a bug.
+   */
+  run<T>(ws: string, fn: (r: WorkspaceRepos) => Promise<T>): Promise<T> {
+    const next = this.lock.then(() => this.runIsolated(ws, fn));
+    this.lock = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runIsolated<T>(ws: string, fn: (r: WorkspaceRepos) => Promise<T>): Promise<T> {
     const snapshot = { checks: structuredClone(this.checks), jobs: structuredClone(this.jobs), audit: structuredClone(this.audit), observations: structuredClone(this.observations) };
     try {
       return await this.runInner(ws, fn);

@@ -40,6 +40,9 @@ export class MemoryCache implements KeyValueCache {
 
   /** Insert with capacity bound: drop expired entries first, then the oldest. */
   private put(key: string, value: string, expires: number) {
+    // An expired key being refreshed is reinserted as newest, not left at its old position.
+    const existing = this.store.get(key);
+    if (existing && existing.expires <= this.now()) this.store.delete(key);
     if (!this.store.has(key) && this.store.size >= this.maxEntries) {
       const now = this.now();
       for (const [k, v] of this.store) if (v.expires <= now) this.store.delete(k);

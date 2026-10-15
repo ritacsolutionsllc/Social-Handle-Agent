@@ -14,13 +14,23 @@ const safeMessage = (err: unknown) => (err instanceof Error ? err.message.slice(
 export const RUNNING_LEASE_MS = 10 * 60 * 1000;
 
 /**
+ * When a skipped `running` job's lease ends (epoch ms), or null if the job is not leased.
+ * Queues use it to redeliver after the lease so stale recovery gets a chance to run:
+ * a crashed worker's job is often redelivered (BullMQ stalled-job check) well inside the lease.
+ */
+export function leaseExpiresAt(job: Pick<JobRecord, 'status' | 'updatedAt'> | null): number | null {
+  return job?.status === 'running' ? new Date(job.updatedAt).getTime() + RUNNING_LEASE_MS : null;
+}
+
+/**
  * Processes one account-creation job. Idempotent: anything not `queued` is skipped,
  * and every transition is a compare-and-set on (status, generation), so duplicate
  * deliveries are harmless and a worker still finishing a cancelled attempt can never
  * overwrite a newer one (cancel/retry bump the generation).
  *
  * A job left `running` past RUNNING_LEASE_MS (worker crashed mid-attempt) is moved back
- * to `queued` by the next delivery instead of being skipped forever.
+ * to `queued` by the next delivery instead of being skipped forever. A delivery that finds
+ * the lease still held returns the `running` job; see leaseExpiresAt().
  *
  * Throws RetryableJobError when the queue should retry (job is put back to `queued`).
  */

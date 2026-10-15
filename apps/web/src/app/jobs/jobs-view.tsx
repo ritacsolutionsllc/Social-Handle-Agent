@@ -36,7 +36,9 @@ function Copy({ value, label }: { value: string; label: string }) {
 
 export function JobsView() {
   const [jobs, setJobs] = useState<JobRecord[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Separate so a successful poll cannot hide a failed cancel/retry/confirm.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(
@@ -44,9 +46,9 @@ export function JobsView() {
       api<{ jobs: JobRecord[] }>('/api/creation-jobs')
         .then((r) => {
           setJobs(r.jobs);
-          setError(null);
+          setLoadError(null);
         })
-        .catch((e) => setError(isApiError(e) ? e.message : 'Could not load jobs.')),
+        .catch((e) => setLoadError(isApiError(e) ? e.message : 'Could not load jobs.')),
     [],
   );
 
@@ -63,21 +65,21 @@ export function JobsView() {
 
   async function act(job: JobRecord, action: 'cancel' | 'retry' | 'confirm') {
     setBusy(`${job.id}:${action}`);
-    setError(null);
+    setActionError(null);
     try {
       await api(`/api/creation-jobs/${job.id}/${action}`, { method: 'POST', body: {} });
       await load();
     } catch (e) {
-      setError(isApiError(e) ? e.message : 'Action failed.');
+      setActionError(isApiError(e) ? e.message : 'Action failed.');
     } finally {
       setBusy(null);
     }
   }
 
   if (!jobs) {
-    return error ? (
+    return loadError ? (
       <div className="space-y-3">
-        <Alert tone="error">{error}</Alert>
+        <Alert tone="error">{loadError}</Alert>
         <Button variant="secondary" onClick={() => void load()}>Try again</Button>
       </div>
     ) : (
@@ -93,7 +95,8 @@ export function JobsView() {
           Every platform uses guided manual registration: open the registration page, complete signup and verification yourself, then confirm here. We re-check the handle before marking a job succeeded.
         </p>
       </div>
-      {error && <Alert tone="error">{error}</Alert>}
+      {actionError && <Alert tone="error" title="Action failed">{actionError}</Alert>}
+      {loadError && <Alert tone="error">{loadError}</Alert>}
       {jobs.length === 0 && <Card className="p-6 text-sm text-slate-600">No jobs yet. Run a check, choose a handle and confirm a creation plan.</Card>}
       {jobs.map((job) => (
         <Card key={job.id} className="p-5" data-testid={`job-${job.platform}`}>

@@ -69,10 +69,10 @@ export function CheckForm({ platforms }: { platforms: PlatformSummary[] }) {
           )}
         </div>
 
-        <fieldset className="relative">
+        <fieldset>
           {/* <legend> must be the fieldset's first child to name it for assistive technology. */}
           <legend className="text-sm font-medium">Platforms ({selected.length}/{platforms.length})</legend>
-          <div className="absolute right-0 top-0 flex gap-2 text-xs">
+          <div className="mt-1 flex justify-end gap-2 text-xs">
             <button type="button" className="text-indigo-700 hover:underline" onClick={() => setSelected(platforms.map((p) => p.slug))}>All</button>
             <button type="button" className="text-indigo-700 hover:underline" onClick={() => setSelected([])}>None</button>
           </div>
