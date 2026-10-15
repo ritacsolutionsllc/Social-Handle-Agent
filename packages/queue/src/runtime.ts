@@ -40,10 +40,16 @@ export function createRuntime(env: Record<string, string | undefined> = process.
 
   const db = createDb(settings.DATABASE_URL);
   const needsRedis = settings.CACHE_DRIVER === 'redis' || settings.QUEUE_DRIVER === 'bullmq';
+  // BullMQ requires maxRetriesPerRequest=null, which queues commands indefinitely while
+  // disconnected. That is right for durable jobs but would hang every request on the
+  // cache/rate-limit path, so the cache gets its own fail-fast connection.
   const redis = needsRedis ? new Redis(settings.REDIS_URL!, { maxRetriesPerRequest: null }) : null;
+  const cacheRedis =
+    settings.CACHE_DRIVER === 'redis' ? new Redis(settings.REDIS_URL!, { maxRetriesPerRequest: 1, enableOfflineQueue: false, connectTimeout: 2_000, commandTimeout: 500 }) : null;
   // ioredis reconnects on its own; without a listener connection errors surface as unhandled 'error' events.
-  redis?.on('error', (err) => logger.error('redis.error', { error: err.message }));
-  const cache: KeyValueCache = settings.CACHE_DRIVER === 'redis' ? new RedisCache(redis!) : new MemoryCache();
+  redis?.on('error', (err) => logger.error('redis.error', { connection: 'queue', error: err.message }));
+  cacheRedis?.on('error', (err) => logger.error('redis.error', { connection: 'cache', error: err.message }));
+  const cache: KeyValueCache = cacheRedis ? new RedisCache(cacheRedis) : new MemoryCache();
   const catalog = createPlatformCatalog(db.db);
 
   // Separate registries; there is no fallback from live to mock anywhere.
@@ -105,7 +111,8 @@ export function createRuntime(env: Record<string, string | undefined> = process.
     async close() {
       if (dispatcher instanceof BullMqDispatcher) await dispatcher.close();
       await inline?.drain();
-      await redis?.quit();
+      await redis?.quit().catch(() => redis.disconnect());
+      await cacheRedis?.quit().catch(() => cacheRedis.disconnect());
       await db.close();
     },
   };

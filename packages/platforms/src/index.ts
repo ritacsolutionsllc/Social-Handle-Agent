@@ -7,3 +7,4 @@ export * from './registry';
 export * from './adapters/live';
 export { MockAvailabilityAdapter, MOCK_FIXTURES } from './adapters/mock';
 export { makeResult } from './adapters/result';
+export * from './rate-limit';

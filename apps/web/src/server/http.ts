@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { DomainError, type AuthContext } from '@sha/core';
+import { ResilientRateCounter } from '@sha/platforms';
 import { runtime } from './runtime';
 import { readSession, type Session } from './session';
 
@@ -70,13 +71,21 @@ function assertCsrf(req: NextRequest, session: Session | null) {
   if (session && req.headers.get('x-csrf-token') !== session.csrf) throw new DomainError('csrf_failed', 'Missing or invalid CSRF token. Reload the page.', 403);
 }
 
+// One counter per process: shared store (Redis when configured), in-memory fallback if it is down.
+const g = globalThis as unknown as { __shaRateCounter?: ResilientRateCounter };
+function rateCounter(): ResilientRateCounter {
+  const rt = runtime();
+  g.__shaRateCounter ??= new ResilientRateCounter(rt.cache, undefined, rt.deps.logger);
+  return g.__shaRateCounter;
+}
+
 async function enforceLimits(limits: Limit[], ip: string, session: Session | null) {
-  const cache = runtime().cache;
+  const counter = rateCounter();
   for (const l of limits) {
     const subject = l.by === 'ip' ? ip : l.by === 'user' ? session?.userId : session?.workspaceId;
     if (!subject) continue;
     const window = Math.floor(Date.now() / 1000 / l.windowSeconds);
-    const n = await cache.incr(`rl:${l.name}:${l.by}:${subject}:${window}`, l.windowSeconds);
+    const n = await counter.hit(`rl:${l.name}:${l.by}:${subject}:${window}`, l.windowSeconds);
     if (n > l.max) throw new DomainError('rate_limited', `Too many requests. Try again in a minute.`, 429, { retryAfter: l.windowSeconds, scope: l.by });
   }
 }

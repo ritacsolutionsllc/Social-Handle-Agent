@@ -66,7 +66,7 @@ Redirects, login walls, captchas, bot-protection pages and bare 404s are never t
 - Username rules in the catalog are best-effort summaries of platform help pages. They live in the `platforms` table so they can be corrected without a deploy; re-verify periodically.
 - X API access requires a paid tier; YouTube API calls consume quota (rate-limit responses are surfaced as `rate_limited` and retried with backoff).
 - `InlineDispatcher` is not durable (a restart drops in-flight work; jobs stay `queued` and can be retried). Use BullMQ in any shared environment.
-- Rate limiting with `CACHE_DRIVER=memory` is per-process; use Redis when running more than one instance.
+- Rate limiting with `CACHE_DRIVER=memory` is per-process; use Redis when running more than one instance. If Redis becomes unavailable, limits fall back to per-process memory counters (logged as `ratelimit.store_unavailable`) rather than rejecting requests.
 - Session role is captured at login (8h TTL); role changes take effect on next login.
 
 ## Architecture
