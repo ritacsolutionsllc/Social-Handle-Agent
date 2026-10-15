@@ -1,10 +1,11 @@
-# Local dependencies only (Postgres + Redis). Credentials here are for local development.
+# Local dependencies only (Postgres + Redis). The password comes from .env (see .env.example);
+# no credential is committed here.
 services:
   postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
       POSTGRES_DB: postgres
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]

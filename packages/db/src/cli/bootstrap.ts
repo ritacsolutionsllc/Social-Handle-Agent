@@ -16,6 +16,9 @@ const appUser = decodeURIComponent(appUrl.username);
 const appPassword = requireEnv('APP_DB_PASSWORD');
 const ident = /^[a-z_][a-z0-9_]{0,62}$/;
 if (!ident.test(appUser)) throw new Error('DATABASE_URL username must be a simple lowercase identifier');
+if (/CHANGE_ME/.test(appPassword) || /CHANGE_ME/.test(process.env.ADMIN_DATABASE_URL ?? '')) {
+  throw new Error('Replace the CHANGE_ME_* placeholders in .env with real local passwords (openssl rand -hex 16).');
+}
 if (!/^[A-Za-z0-9._~-]{12,128}$/.test(appPassword)) throw new Error('APP_DB_PASSWORD must be 12-128 URL-safe characters');
 
 const dbNames = [appUrl, process.env.TEST_DATABASE_URL ? new URL(process.env.TEST_DATABASE_URL) : null]

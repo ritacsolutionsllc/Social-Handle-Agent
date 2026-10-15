@@ -8,8 +8,8 @@ Check whether a brand's handle is available across the top 10 social platforms, 
 
 ```bash
 npm ci
-cp .env.example .env
-# Postgres 16 + Redis: either local services or `docker compose up -d`
+cp .env.example .env      # then replace each CHANGE_ME_* value (e.g. `openssl rand -hex 16`)
+# Postgres 16 + Redis: either local services or `docker compose up -d` (reads POSTGRES_PASSWORD from .env)
 npm run db:setup          # creates roles + DBs, applies migrations, seeds the platform catalog
 npm run dev               # http://localhost:3000 — sign in with any email (dev auth)
 ```

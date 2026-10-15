@@ -11,7 +11,7 @@ Guidance for Claude Code (and humans) working in this repo. Keep it current when
 ```bash
 # One-time setup
 npm ci                                   # install from lockfile
-cp .env.example .env                     # local-only values; .env is git-ignored
+cp .env.example .env                     # replace every CHANGE_ME_* (openssl rand -hex 16); .env is git-ignored
 npm run db:setup                         # = db:bootstrap + db:migrate + db:seed (local Postgres)
 npx tsx packages/db/src/cli/migrate.ts --test && npx tsx packages/db/src/cli/seed.ts --test   # test DB
 
