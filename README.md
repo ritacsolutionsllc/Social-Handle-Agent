@@ -27,6 +27,10 @@ Defaults: `AVAILABILITY_PROVIDER_MODE=mock`, `ACCOUNT_CREATION_ENABLED=false`. M
 
 Test database: `npx tsx packages/db/src/cli/migrate.ts --test && npx tsx packages/db/src/cli/seed.ts --test`.
 
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`: `npm ci` → typecheck → database bootstrap/migrate/seed against a Postgres 16 service → Vitest (including the RLS-isolation and BullMQ integration tests, with a Redis 7 service) → production build → Playwright E2E. It uses the mock provider with account creation disabled, needs no repository secrets, generates a fresh database password per run, and uploads the Playwright report when a run fails.
+
 ## Environment variables
 
 See [`.env.example`](.env.example) for every variable with explanations. Key ones:

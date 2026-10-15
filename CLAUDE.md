@@ -28,6 +28,9 @@ npm run build                            # production build; forces NODE_ENV=pro
 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium npm run test:e2e   # cloud env: preinstalled Chromium
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same sequence on every PR: typecheck → DB setup → `npm test` → build → E2E.
+Keep it green; validate workflow edits with `actionlint` before pushing.
+
 Cloud environment notes:
 - Start services if they are down: `service postgresql start && redis-server --daemonize yes`.
 - The env sets `NODE_ENV=development` globally; `npm run build`/`start` override it to `production` (Next requires that).
