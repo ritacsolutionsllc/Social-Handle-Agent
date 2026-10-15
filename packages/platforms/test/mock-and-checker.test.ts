@@ -125,3 +125,62 @@ describe('robots.txt', () => {
     expect(isPathAllowed(g, 'x', '/a/b.json?x')).toBe(true);
   });
 });
+
+describe('review fixes: cache, semaphore, checker, robots', () => {
+  it('MemoryCache.incr is atomic under concurrency', async () => {
+    const c = new MemoryCache();
+    const counts = await Promise.all(Array.from({ length: 50 }, () => c.incr('k', 60)));
+    expect(new Set(counts).size).toBe(50);
+    expect(Math.max(...counts)).toBe(50);
+  });
+  it('MemoryCache stays within maxEntries for incr keys', async () => {
+    const c = new MemoryCache(10);
+    for (let i = 0; i < 100; i++) await c.incr(`rl:${i}`, 60);
+    expect((c as unknown as { store: Map<string, unknown> }).store.size).toBeLessThanOrEqual(10);
+  });
+  it('Semaphore never exceeds max during release handoff', async () => {
+    const { Semaphore } = await import('../src');
+    const s = new Semaphore(1);
+    const r1 = await s.acquire();
+    const waiting = s.acquire();
+    r1(); // hands the permit to the waiter
+    await expect(Promise.race([s.acquire().then(() => 'stole'), new Promise((r) => setTimeout(() => r('blocked'), 20))])).resolves.toBe('blocked');
+    (await waiting)();
+  });
+  it('Semaphore refuses an already-aborted signal even with free capacity', async () => {
+    const { Semaphore } = await import('../src');
+    await expect(new Semaphore(5).acquire(AbortSignal.abort())).rejects.toBeDefined();
+  });
+  it('a corrupt cache entry is treated as a miss', async () => {
+    const cache = new MemoryCache();
+    const c = new AvailabilityChecker({ registry: createMockRegistry(), cache, cacheTtlSeconds: 300, concurrency: 2 });
+    await cache.set(c.cacheKey('x', 'acmerobotics'), '{not json', 60);
+    expect((await c.checkOne({ platform: platform('x'), handle: 'acmerobotics' }, { signal: signal() })).status).toBe('taken');
+  });
+  it('does not cache missing_credentials results', async () => {
+    const cache = new MemoryCache();
+    const live = createLiveRegistry(deps(fakeFetch([])), platform);
+    const c = new AvailabilityChecker({ registry: live, cache, cacheTtlSeconds: 300, concurrency: 2 });
+    const r = await c.checkOne({ platform: platform('x'), handle: 'acmehq' }, { signal: signal() });
+    expect(r.reason).toBe('missing_credentials');
+    expect(await cache.get(c.cacheKey('x', 'acmehq'))).toBeNull();
+  });
+  it('robots: a caller abort propagates and is not cached as disallow-all', async () => {
+    const { RobotsPolicy } = await import('../src');
+    let calls = 0;
+    const robots = new RobotsPolicy(async (_u, init) => {
+      calls++;
+      if (calls === 1) throw init?.signal?.reason ?? new Error('aborted');
+      return new Response('User-agent: *\nAllow: /');
+    }, 'test');
+    const ac = new AbortController();
+    ac.abort();
+    await expect(robots.isAllowed('https://example.test/a', ac.signal)).rejects.toBeDefined();
+    await expect(robots.isAllowed('https://example.test/a', signal())).resolves.toBe(true);
+  });
+  it('mock confidence mirrors live adapters (X available is medium, TikTok low)', async () => {
+    expect((await new MockAvailabilityAdapter('x').check('acmeroboticshq', platform('x'), { signal: signal() })).confidence).toBe('medium');
+    expect((await new MockAvailabilityAdapter('tiktok').check('acmeroboticshq', platform('tiktok'), { signal: signal() })).confidence).toBe('low');
+    expect((await new MockAvailabilityAdapter('reddit').check('acmeroboticshq', platform('reddit'), { signal: signal() })).confidence).toBe('high');
+  });
+});

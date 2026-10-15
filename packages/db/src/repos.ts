@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
+  DomainError,
   PlatformConfigSchema,
   type AuditEventInput,
   type AvailabilityResult,
@@ -50,6 +51,7 @@ function toJob(r: JobRow, events: EventRow[]): JobRecord {
     email: r.email,
     status: r.status as JobStatus,
     attempts: r.attempts,
+    generation: r.generation,
     lastError: r.lastError,
     storeCredentials: r.storeCredentials,
     nextAction: r.nextAction ?? null,
@@ -167,7 +169,16 @@ export function workspaceRepos(tx: Tx, workspaceId: string): WorkspaceRepos {
     },
     jobs: {
       async create(input) {
-        const [row] = await tx.insert(t.accountCreationJobs).values({ workspaceId, ...input, status: 'queued' }).returning();
+        const [row] = await tx
+          .insert(t.accountCreationJobs)
+          .values({ workspaceId, ...input, status: 'queued' })
+          .returning()
+          .catch((err: unknown) => {
+            // Lost a race with a concurrent request past findActive(): report 409, not 500.
+            const code = (err as { cause?: { code?: string }; code?: string }).cause?.code ?? (err as { code?: string }).code;
+            if (code === '23505') throw new DomainError('conflict', `An active job already exists for ${input.platform} @${input.handle}.`, 409);
+            throw err;
+          });
         await tx.insert(t.accountCreationJobEvents).values({
           jobId: row!.id,
           workspaceId,
@@ -199,11 +210,13 @@ export function workspaceRepos(tx: Tx, workspaceId: string): WorkspaceRepos {
           );
         return (await loadJobs(rows))[0] ?? null;
       },
-      async update(id, expectedStatus, patch, event) {
+      async update(id, expectedStatus, patch, event, expectedGeneration) {
+        const conds = [eq(t.accountCreationJobs.id, id), eq(t.accountCreationJobs.status, expectedStatus)];
+        if (expectedGeneration !== undefined) conds.push(eq(t.accountCreationJobs.generation, expectedGeneration));
         const [row] = await tx
           .update(t.accountCreationJobs)
           .set({ ...patch, updatedAt: sql`now()` })
-          .where(and(eq(t.accountCreationJobs.id, id), eq(t.accountCreationJobs.status, expectedStatus)))
+          .where(and(...conds))
           .returning();
         if (!row) return null;
         await tx.insert(t.accountCreationJobEvents).values({

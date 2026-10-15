@@ -99,6 +99,7 @@ export const accountCreationJobs = pgTable('account_creation_jobs', {
   email: text('email').notNull(),
   status: text('status').notNull(),
   attempts: integer('attempts').notNull().default(0),
+  generation: integer('generation').notNull().default(0),
   lastError: text('last_error'),
   storeCredentials: boolean('store_credentials').notNull().default(false),
   nextAction: jsonb('next_action').$type<NextAction | null>(),

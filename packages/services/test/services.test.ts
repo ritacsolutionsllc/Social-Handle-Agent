@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DomainError, PLATFORM_CATALOG, type CreationJobsRequest } from '@sha/core';
-import { createLiveRegistry, type LiveAdapterDeps } from '@sha/platforms';
+import { AvailabilityChecker, createLiveRegistry, MemoryCache, type LiveAdapterDeps } from '@sha/platforms';
 import { CheckService, CreationService, MockCreationAdapter, processCreationJob, RetryableJobError, createLogger } from '../src';
 import { ctx, makeDeps } from './fakes';
 
@@ -199,13 +199,13 @@ describe('CreationService — enabled', () => {
     const { deps, dispatcher } = enabled();
     const check = await seedCheck(deps);
     const s = new CreationService(deps);
-    const [job] = await s.createJobs(ctx(), jobsReq(check.id, ['pinterest']));
+    const [job] = await s.createJobs(ctx(), jobsReq(check.id, ['reddit']));
     expect((await s.cancel(ctx(), job!.id)).status).toBe('cancelled');
     await expectDomainError(s.cancel(ctx(), job!.id), 'invalid_transition', 409);
     expect((await s.retry(ctx(), job!.id)).status).toBe('queued');
     expect(dispatcher.enqueued).toHaveLength(2);
     await processCreationJob(deps, { workspaceId: 'ws-alice', jobId: job!.id });
-    // Mock still says "available" with medium+ confidence → user hasn't finished signup.
+    // Mock Reddit still says "available" at high confidence → user hasn't finished signup.
     await expectDomainError(s.confirmCompleted(ctx(), job!.id), 'conflict', 409);
   });
 
@@ -228,5 +228,84 @@ describe('logger', () => {
     const out = lines[0]!;
     expect(out).not.toMatch(/abc|"p"|"k"/);
     expect(JSON.parse(out)).toMatchObject({ level: 'info', msg: 'x', service: 't', nested: { password: '[REDACTED]', ok: 1 } });
+  });
+});
+
+describe('logger depth guard', () => {
+  it('never emits an unredacted subtree beyond the depth limit', () => {
+    const lines: string[] = [];
+    let deep: Record<string, unknown> = { password: 'hunter2' };
+    for (let i = 0; i < 10; i++) deep = { nested: deep };
+    createLogger({}, (l) => lines.push(l)).info('x', deep);
+    expect(lines[0]).not.toContain('hunter2');
+  });
+});
+
+describe('job lifecycle hardening (review fixes)', () => {
+  const enabledSettings = { ACCOUNT_CREATION_ENABLED: true, AVAILABILITY_PROVIDER_MODE: 'mock' as const, CHECK_DEADLINE_MS: 5000 };
+
+  it('a worker finishing a cancelled attempt cannot overwrite the retried attempt', async () => {
+    // Adapter that pauses so we can cancel + retry while attempt 1 is in flight.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = { key: 'slow', prepare: async (job: import('@sha/core').JobRecord, p: import('@sha/core').PlatformConfig) => { await gate; return new MockCreationAdapter('awaiting').prepare(job, p); } };
+    const { deps } = makeDeps({ creationAdapter: slow, settings: enabledSettings });
+    const check = await seedCheck(deps);
+    const s = new CreationService(deps);
+    const [job] = await s.createJobs(ctx(), jobsReq(check.id, ['reddit']));
+    const ref = { workspaceId: 'ws-alice', jobId: job!.id };
+    const attempt1 = processCreationJob(deps, ref);
+    await new Promise((r) => setTimeout(r, 5));
+    await s.cancel(ctx(), job!.id);
+    const retried = await s.retry(ctx(), job!.id);
+    expect(retried).toMatchObject({ status: 'queued', attempts: 0, generation: 2 });
+    release();
+    expect(await attempt1).toBeNull(); // stale attempt's result discarded
+    expect((await s.getJob(ctx(), job!.id)).status).toBe('queued');
+  });
+
+  it('recovers a job stuck in running after its lease expires', async () => {
+    const { deps, store } = makeDeps({ settings: enabledSettings });
+    const check = await seedCheck(deps);
+    const [job] = await new CreationService(deps).createJobs(ctx(), jobsReq(check.id, ['reddit']));
+    const stored = store.jobs.get(job!.id)!;
+    stored.status = 'running';
+    stored.updatedAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    const out = await processCreationJob({ ...deps, now: () => new Date() }, { workspaceId: 'ws-alice', jobId: job!.id });
+    expect(out?.status).toBe('awaiting_verification');
+    expect(out?.events.some((e) => /stale running attempt/.test(e.message))).toBe(true);
+  });
+
+  it('only accepts manual confirmation from awaiting_verification', async () => {
+    const { deps } = makeDeps({ settings: enabledSettings });
+    const check = await seedCheck(deps);
+    const s = new CreationService(deps);
+    const [job] = await s.createJobs(ctx(), jobsReq(check.id, ['facebook']));
+    await expectDomainError(s.confirmCompleted(ctx(), job!.id), 'invalid_transition', 409); // still queued
+  });
+
+  it('marks a job failed (retryable) when dispatch fails after commit', async () => {
+    const { deps } = makeDeps({ settings: enabledSettings, dispatcher: { enqueue: async () => { throw new Error('redis down'); } } });
+    const check = await seedCheck(deps);
+    const s = new CreationService(deps);
+    const [job] = await s.createJobs(ctx(), jobsReq(check.id, ['reddit']));
+    expect(job).toMatchObject({ status: 'failed', lastError: expect.stringMatching(/Retry/) });
+  });
+
+  it('rolls back the whole batch when one platform conflicts', async () => {
+    const { deps, store } = makeDeps({ settings: enabledSettings });
+    const check = await seedCheck(deps);
+    const s = new CreationService(deps);
+    await s.createJobs(ctx(), jobsReq(check.id, ['reddit']));
+    const before = store.jobs.size;
+    await expectDomainError(s.createJobs(ctx(), jobsReq(check.id, ['x', 'reddit'])), 'conflict', 409);
+    expect(store.jobs.size).toBe(before); // the 'x' job from the failed batch was rolled back
+  });
+
+  it('refuses a recheck under a different provider mode', async () => {
+    const { deps } = makeDeps();
+    const r = await new CheckService(deps).runCheck(ctx(), { input: 'Acme Robotics', includeAlternatives: false });
+    const liveChecker = new AvailabilityChecker({ registry: { mode: 'live', get: () => undefined }, cache: new MemoryCache(), cacheTtlSeconds: 300, concurrency: 2 });
+    await expectDomainError(new CheckService({ ...deps, checker: liveChecker }).recheck(ctx(), r.id, 'reddit', 'acmerobotics'), 'conflict', 409);
   });
 });

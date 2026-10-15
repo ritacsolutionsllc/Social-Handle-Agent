@@ -17,15 +17,17 @@ export interface SealedSecret {
 
 const ALG = 'aes-256-gcm';
 
-function gcmEncrypt(key: Buffer, plaintext: Buffer) {
+function gcmEncrypt(key: Buffer, plaintext: Buffer, aad?: Buffer) {
   const iv = randomBytes(12);
   const c = createCipheriv(ALG, key, iv);
+  if (aad) c.setAAD(aad);
   const ciphertext = Buffer.concat([c.update(plaintext), c.final()]);
   return { iv, ciphertext, authTag: c.getAuthTag() };
 }
 
-function gcmDecrypt(key: Buffer, iv: Buffer, ciphertext: Buffer, authTag: Buffer) {
+function gcmDecrypt(key: Buffer, iv: Buffer, ciphertext: Buffer, authTag: Buffer, aad?: Buffer) {
   const d = createDecipheriv(ALG, key, iv);
+  if (aad) d.setAAD(aad);
   d.setAuthTag(authTag);
   return Buffer.concat([d.update(ciphertext), d.final()]);
 }
@@ -40,9 +42,13 @@ export class CredentialVault {
     this.kek = k;
   }
 
-  seal(plaintext: string): SealedSecret {
+  /**
+   * @param context identity the secret belongs to, e.g. `${workspaceId}:${platform}:${label}`.
+   * Bound as GCM associated data: moving sealed fields to another row makes open() fail.
+   */
+  seal(plaintext: string, context: string): SealedSecret {
     const dek = randomBytes(32);
-    const data = gcmEncrypt(dek, Buffer.from(plaintext, 'utf8'));
+    const data = gcmEncrypt(dek, Buffer.from(plaintext, 'utf8'), Buffer.from(context, 'utf8'));
     const wrapped = gcmEncrypt(this.kek, dek);
     dek.fill(0);
     return {
@@ -55,11 +61,11 @@ export class CredentialVault {
     };
   }
 
-  open(s: SealedSecret): string {
+  open(s: SealedSecret, context: string): string {
     if (s.keyVersion !== this.keyVersion) throw new Error(`no key for version ${s.keyVersion}`);
     const dek = gcmDecrypt(this.kek, s.wrappedDek.subarray(0, 12), s.wrappedDek.subarray(28), s.wrappedDek.subarray(12, 28));
     try {
-      return gcmDecrypt(dek, s.iv, s.ciphertext, s.authTag).toString('utf8');
+      return gcmDecrypt(dek, s.iv, s.ciphertext, s.authTag, Buffer.from(context, 'utf8')).toString('utf8');
     } finally {
       dek.fill(0);
     }

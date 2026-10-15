@@ -29,3 +29,11 @@ describe('rankCandidates', () => {
     expect(recommend(ranked)).toBeNull();
   });
 });
+
+describe('rankCandidates relevance tie-break', () => {
+  it('prefers higher brand relevance when availability, length, digits and symbols tie', () => {
+    const cs = [cand('acmeco', 0.5), cand('acmehq', 0.9)];
+    const rs = cs.map((c) => res(c.handle, 'x', 'available'));
+    expect(rankCandidates(cs, (c) => rs.filter((r) => r.handle === c.handle))[0]!.candidate.handle).toBe('acmehq');
+  });
+});

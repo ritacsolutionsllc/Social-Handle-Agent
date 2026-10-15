@@ -44,7 +44,8 @@ See [`.env.example`](.env.example) for every variable with explanations. Key one
 | `DATABASE_URL` | — | Least-privilege `sha_app` login role, subject to RLS. |
 | `MIGRATION_DATABASE_URL` / `ADMIN_DATABASE_URL` | — | Owner/admin roles used only by CLIs, never by the app. |
 | `QUEUE_DRIVER` / `CACHE_DRIVER` / `REDIS_URL` | `inline` / `memory` | Use `bullmq` + `redis` for durable jobs and shared cache/rate limits. |
-| `SESSION_SECRET` | dev fallback | Required (32+ chars) in production. |
+| `SESSION_SECRET` | random per process (dev only) | Required (32+ chars) in staging and production. |
+| `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies in front of the app; the client IP for rate limiting is read from that position in `X-Forwarded-For`. `0` ignores the (client-controlled) header. |
 | Live adapter creds | unset | `X_BEARER_TOKEN`, `YOUTUBE_API_KEY`, `REDDIT_CLIENT_ID/SECRET/USER_AGENT`, `META_GRAPH_ACCESS_TOKEN` + `META_IG_BUSINESS_ACCOUNT_ID`. Server-only; never authorize registration. |
 
 ## Platforms: what is checked, how, and what is provisioned

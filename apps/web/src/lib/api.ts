@@ -23,7 +23,7 @@ export async function api<T>(path: string, init: { method?: 'GET' | 'POST'; body
   });
   const data = (await res.json().catch(() => ({}))) as { error?: Omit<ApiError, 'status'>; requestId?: string };
   if (!res.ok) {
-    if (res.status === 401 && typeof window !== 'undefined') window.location.href = '/login';
+    if (res.status === 401 && typeof window !== 'undefined' && !path.startsWith('/api/auth/')) window.location.href = '/login';
     throw { status: res.status, requestId: data.requestId, ...(data.error ?? { code: 'internal_error', message: `Request failed (${res.status})` }) } as ApiError;
   }
   return data as T;

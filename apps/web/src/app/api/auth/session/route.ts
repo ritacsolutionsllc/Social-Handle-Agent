@@ -1,3 +1,4 @@
+import { errors } from 'jose';
 import { DomainError, SupabaseSessionSchema } from '@sha/core';
 import { AUTH_LIMITS, parseJson, route } from '@/server/http';
 import { runtime } from '@/server/runtime';
@@ -9,8 +10,13 @@ export const POST = route(
     const rt = runtime();
     if (rt.settings.AUTH_MODE !== 'supabase') throw new DomainError('forbidden', 'Supabase login is not enabled.', 403);
     const { accessToken } = await parseJson(req, SupabaseSessionSchema);
-    const email = await verifySupabaseToken(accessToken).catch(() => {
-      throw new DomainError('unauthorized', 'Invalid or expired sign-in token.', 401);
+    const email = await verifySupabaseToken(accessToken).catch((err: unknown) => {
+      // Token problems are the user's (401); JWKS outages or misconfiguration stay 5xx.
+      const tokenProblem = err instanceof errors.JOSEError && /^ERR_(JWT|JWS)_/.test(err.code);
+      if (tokenProblem || (err instanceof Error && err.message === 'token has no email')) {
+        throw new DomainError('unauthorized', 'Invalid or expired sign-in token.', 401);
+      }
+      throw err;
     });
     const identity = await rt.provisioner.provision(email);
     const s = await issueSession({ ...identity, email: email.toLowerCase() });

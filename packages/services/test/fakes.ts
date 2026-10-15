@@ -10,7 +10,21 @@ export class FakeStore implements UnitOfWork {
   audit: Array<AuditEventInput & { workspaceId: string }> = [];
   observations: AvailabilityResult[] = [];
 
+  /** Transactional like the real UnitOfWork: all writes are rolled back if `fn` throws. */
   async run<T>(ws: string, fn: (r: WorkspaceRepos) => Promise<T>): Promise<T> {
+    const snapshot = { checks: structuredClone(this.checks), jobs: structuredClone(this.jobs), audit: structuredClone(this.audit), observations: structuredClone(this.observations) };
+    try {
+      return await this.runInner(ws, fn);
+    } catch (err) {
+      this.checks = snapshot.checks;
+      this.jobs = snapshot.jobs;
+      this.audit = snapshot.audit;
+      this.observations = snapshot.observations;
+      throw err;
+    }
+  }
+
+  private async runInner<T>(ws: string, fn: (r: WorkspaceRepos) => Promise<T>): Promise<T> {
     const own = <V extends { workspaceId: string }>(v: V | undefined) => (v && v.workspaceId === ws ? v : null);
     const repos: WorkspaceRepos = {
       checks: {
@@ -34,7 +48,7 @@ export class FakeStore implements UnitOfWork {
       jobs: {
         create: async (input) => {
           const now = new Date().toISOString();
-          const job: JobRecord = { id: randomUUID(), workspaceId: ws, status: 'queued', attempts: 0, lastError: null, storeCredentials: false, nextAction: null, createdAt: now, updatedAt: now, events: [{ fromStatus: null, toStatus: 'queued', message: 'created', actorUserId: input.requestedBy, createdAt: now }], ...input };
+          const job: JobRecord = { id: randomUUID(), workspaceId: ws, status: 'queued', attempts: 0, generation: 0, lastError: null, storeCredentials: false, nextAction: null, createdAt: now, updatedAt: now, events: [{ fromStatus: null, toStatus: 'queued', message: 'created', actorUserId: input.requestedBy, createdAt: now }], ...input };
           this.jobs.set(job.id, job);
           return structuredClone(job);
         },
@@ -42,9 +56,10 @@ export class FakeStore implements UnitOfWork {
         list: async () => [...this.jobs.values()].filter((j) => j.workspaceId === ws).map((j) => structuredClone(j)),
         findActive: async (platform, handle) =>
           [...this.jobs.values()].find((j) => j.workspaceId === ws && j.platform === platform && j.handle === handle && ['queued', 'running', 'awaiting_verification'].includes(j.status)) ?? null,
-        update: async (id, expected, patch, event) => {
+        update: async (id, expected, patch, event, expectedGeneration) => {
           const j = own(this.jobs.get(id));
           if (!j || j.status !== expected) return null;
+          if (expectedGeneration !== undefined && j.generation !== expectedGeneration) return null;
           Object.assign(j, patch, { updatedAt: new Date().toISOString() });
           j.events.push({ fromStatus: expected, toStatus: j.status, message: event.message, actorUserId: event.actorUserId, createdAt: j.updatedAt });
           return structuredClone(j);

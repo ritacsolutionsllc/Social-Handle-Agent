@@ -17,19 +17,19 @@ describe('InlineDispatcher', () => {
     await d.drain();
     expect(calls).toEqual(['j1', 'j1', 'j1']);
   });
-  it('does not retry non-retryable errors', async () => {
+  it('retries unexpected errors within the same attempt budget (processor is idempotent)', async () => {
     const d = new InlineDispatcher(silent, 3, 1);
     let n = 0;
-    d.bind(async () => { n++; throw new Error('permanent'); });
+    d.bind(async () => { n++; throw new Error('transient db error'); });
     await d.enqueue({ workspaceId: 'w', jobId: 'j2' });
     await d.drain();
-    expect(n).toBe(1);
+    expect(n).toBe(3);
   });
 });
 
 const redisUrl = process.env.TEST_REDIS_URL;
 describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
-  it('delivers a job reference to the worker exactly once per enqueue id', async () => {
+  it('delivers every enqueue (no id-based dedupe; the processor CAS makes duplicates harmless)', async () => {
     const conn = new Redis(redisUrl!, { maxRetriesPerRequest: null });
     await conn.flushdb();
     const seen: string[] = [];
@@ -41,11 +41,10 @@ describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
     const worker = startCreationWorker(deps, conn, 1);
     const dispatcher = new BullMqDispatcher(conn, 3, silent);
     await dispatcher.enqueue({ workspaceId: 'w', jobId: 'job-a' });
-    await dispatcher.enqueue({ workspaceId: 'w', jobId: 'job-a' }); // deduped while pending
+    await dispatcher.enqueue({ workspaceId: 'w', jobId: 'job-a' }); // e.g. a retry racing an old delivery
     const deadline = Date.now() + 5000;
-    while (seen.length < 1 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
-    await new Promise((r) => setTimeout(r, 200));
-    expect(seen).toEqual(['job-a']);
+    while (seen.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    expect(seen).toEqual(['job-a', 'job-a']);
     await worker.close();
     await dispatcher.close();
     await conn.quit();

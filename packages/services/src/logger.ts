@@ -4,7 +4,8 @@ const SENSITIVE = /pass(word)?|secret|token|cookie|authorization|api[_-]?key|ver
 
 /** Recursively redact sensitive keys so secrets never reach logs. */
 export function redact(value: unknown, depth = 0): unknown {
-  if (depth > 6 || value === null || typeof value !== 'object') return value;
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > 6) return '[TRUNCATED]'; // never emit an unredacted deep subtree
   if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
   return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SENSITIVE.test(k) ? '[REDACTED]' : redact(v, depth + 1)]));
 }

@@ -49,7 +49,7 @@ export function generateCandidates({ input, requestedHandle, maxAlternatives = 1
   const joined = tokens.join('');
   const requested = requestedHandle ? canonicalize(requestedHandle) : '';
   const primary = requested || (looksLikeHandle(input) && !/\s/.test(input.trim()) ? canonicalize(input) : joined);
-  if (!primary) return [];
+  if (!/[a-z0-9]/.test(primary)) return []; // e.g. '...' is not a brand
 
   // Base for alternatives: separators stripped so "acme_robotics" + "hq" stays clean.
   const base = primary.replace(/[_.-]/g, '');

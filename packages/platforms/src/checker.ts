@@ -26,7 +26,8 @@ export interface CheckManyOptions {
   bypassCache?: boolean;
 }
 
-const CACHEABLE = new Set<AvailabilityResult['reason'] | undefined>([undefined, 'unsupported', 'missing_credentials', 'robots_disallowed', 'ambiguous_response', 'derived_unknown']);
+// missing_credentials is deliberately absent: adding credentials must take effect immediately.
+const CACHEABLE = new Set<AvailabilityResult['reason'] | undefined>([undefined, 'unsupported', 'robots_disallowed', 'ambiguous_response', 'derived_unknown']);
 
 /**
  * Orchestrates adapters: bounded global + per-platform concurrency, short-TTL
@@ -66,7 +67,13 @@ export class AvailabilityChecker {
     const key = this.cacheKey(platform.slug, handle);
     if (!opts.bypassCache) {
       const hit = await this.deps.cache.get(key).catch(() => null);
-      if (hit) return JSON.parse(hit) as AvailabilityResult;
+      if (hit) {
+        try {
+          return JSON.parse(hit) as AvailabilityResult;
+        } catch {
+          // Corrupt or foreign value: treat as a miss and re-check.
+        }
+      }
     }
 
     const adapter = this.deps.registry.get(platform.adapterKey);

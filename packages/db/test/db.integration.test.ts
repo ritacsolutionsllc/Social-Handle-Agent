@@ -98,6 +98,35 @@ describe.skipIf(!url)('Postgres repositories + row-level security (TEST_DATABASE
   it('cannot update or delete audit events (append-only grant)', async () => {
     const alice = await createUserProvisioner(h.db).provision(email('alice3'));
     expect(await pgError(withWorkspace(h.db, alice.workspaceId, (tx) => tx.update(schema.auditEvents).set({ action: 'tampered' })))).toMatch(/permission denied/);
+    expect(await pgError(withWorkspace(h.db, alice.workspaceId, (tx) => tx.delete(schema.auditEvents)))).toMatch(/permission denied/);
+  });
+
+  it('isolates platform_credentials by workspace', async () => {
+    const prov = createUserProvisioner(h.db);
+    const alice = await prov.provision(email('alice5'));
+    const bob = await prov.provision(email('bob5'));
+    const blob = Buffer.from('x');
+    await withWorkspace(h.db, alice.workspaceId, (tx) =>
+      tx.insert(schema.platformCredentials).values({ workspaceId: alice.workspaceId, platform: 'reddit', label: 'oauth', ciphertext: blob, iv: blob, authTag: blob, wrappedDek: blob, keyVersion: 1, createdBy: alice.userId }),
+    );
+    const own = await withWorkspace(h.db, alice.workspaceId, (tx) => tx.select().from(schema.platformCredentials));
+    const other = await withWorkspace(h.db, bob.workspaceId, (tx) => tx.select().from(schema.platformCredentials));
+    expect(own).toHaveLength(1);
+    expect(other).toHaveLength(0);
+  });
+
+  it('rejects references to another workspace even when RLS would allow the row (composite FKs)', async () => {
+    const prov = createUserProvisioner(h.db);
+    const alice = await prov.provision(email('alice6'));
+    const bob = await prov.provision(email('bob6'));
+    const uow = createUnitOfWork(h.db);
+    const aliceCheck = await uow.run(alice.workspaceId, (r) =>
+      r.checks.create({ createdBy: alice.userId, originalInput: 'Acme', requestedHandle: null, normalizedHandle: 'acme', providerMode: 'mock', platforms: ['reddit'], candidates }),
+    );
+    // Bob's workspace context, but pointing at Alice's check: RLS passes, the FK must not.
+    expect(
+      await pgError(uow.run(bob.workspaceId, (r) => r.jobs.create({ checkId: aliceCheck.id, requestedBy: bob.userId, platform: 'reddit', handle: 'acme', email: 'b@example.test', providerMode: 'mock' }))),
+    ).toMatch(/foreign key|violates/);
   });
 
   it('enforces one active job per platform+handle and optimistic status updates', async () => {
@@ -107,12 +136,16 @@ describe.skipIf(!url)('Postgres repositories + row-level security (TEST_DATABASE
       const c = await r.checks.create({ createdBy: alice.userId, originalInput: 'Acme', requestedHandle: null, normalizedHandle: 'acme', providerMode: 'mock', platforms: ['reddit'], candidates });
       return r.jobs.create({ checkId: c.id, requestedBy: alice.userId, platform: 'reddit', handle: 'acme', email: 'a@example.test', providerMode: 'mock' });
     });
-    expect(await pgError(
+    // A concurrent duplicate surfaces as a typed 409 conflict, not a raw 500.
+    await expect(
       uow.run(alice.workspaceId, (r) => r.jobs.create({ checkId: job.checkId, requestedBy: alice.userId, platform: 'reddit', handle: 'acme', email: 'a@example.test', providerMode: 'mock' })),
-    )).toMatch(/account_creation_jobs_active_uniq|duplicate key/);
+    ).rejects.toMatchObject({ code: 'conflict', status: 409 });
     const moved = await uow.run(alice.workspaceId, (r) => r.jobs.update(job.id, 'queued', { status: 'running', attempts: 1 }, { message: 'start', actorUserId: null }));
     expect(moved?.status).toBe('running');
     const stale = await uow.run(alice.workspaceId, (r) => r.jobs.update(job.id, 'queued', { status: 'cancelled' }, { message: 'late', actorUserId: null }));
     expect(stale).toBeNull();
+    // Generation guard: a writer holding an old generation cannot update.
+    const wrongGen = await uow.run(alice.workspaceId, (r) => r.jobs.update(job.id, 'running', { status: 'failed' }, { message: 'stale worker', actorUserId: null }, job.generation + 1));
+    expect(wrongGen).toBeNull();
   });
 });

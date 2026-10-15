@@ -1,4 +1,4 @@
-import type { AvailabilityResult, AvailabilityStatus, PlatformConfig } from '@sha/core';
+import type { AvailabilityResult, AvailabilityStatus, Confidence, PlatformConfig } from '@sha/core';
 import type { AvailabilityAdapter, CheckOptions } from '../types';
 import { sleep } from '../util';
 import { makeResult } from './result';
@@ -20,6 +20,15 @@ export const MOCK_FIXTURES: Record<string, Partial<Record<string, AvailabilitySt
 };
 
 const MOCK_SOURCE = 'mock_fixture';
+
+/** Best confidence each live adapter can give an "available" result (see adapters/live.ts). */
+const AVAILABLE_CONFIDENCE: Partial<Record<string, Confidence>> = { reddit: 'high', x: 'medium', youtube: 'medium' };
+
+function mockConfidence(status: AvailabilityStatus, platform: PlatformConfig): Confidence {
+  if (status === 'taken') return platform.availabilityStrategy === 'official_api' ? 'high' : 'medium';
+  if (status === 'available') return AVAILABLE_CONFIDENCE[platform.slug] ?? 'low';
+  return 'low';
+}
 
 function fnv1a(s: string): number {
   let h = 0x811c9dc5;
@@ -44,7 +53,7 @@ export class MockAvailabilityAdapter implements AvailabilityAdapter {
     const now = (this.opts.now ?? (() => new Date()))();
     const status = this.capability(platform, this.pick(handle, platform.derivedFrom ?? platform.slug));
     const evidence = `Simulated ${status} result from deterministic fixture. No platform was contacted.`;
-    const confidence = status === 'unknown' ? 'low' : platform.availabilityStrategy === 'official_api' ? 'high' : 'medium';
+    const confidence = mockConfidence(status, platform);
     return makeResult(
       platform,
       handle,

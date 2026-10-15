@@ -8,7 +8,7 @@ const HandleInput = z
   .string()
   .trim()
   .min(1)
-  .max(64)
+  .max(110) // generated candidates can reach 100 chars of input + an 8-char suffix
   .regex(/^@?[A-Za-z0-9_.-]+$/, 'handles may only contain letters, numbers, "_", "." and "-"');
 
 const FreeText = z

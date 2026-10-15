@@ -25,19 +25,30 @@ export class MemoryCache implements KeyValueCache {
   }
 
   async set(key: string, value: string, ttlSeconds: number) {
-    if (this.store.size >= this.maxEntries) {
-      const oldest = this.store.keys().next().value;
-      if (oldest !== undefined) this.store.delete(oldest);
-    }
-    this.store.set(key, { value, expires: this.now() + ttlSeconds * 1000 });
+    this.put(key, value, this.now() + ttlSeconds * 1000);
   }
 
+  /** Synchronous read-modify-write: no await between read and write, so concurrent calls cannot interleave. */
   async incr(key: string, ttlSeconds: number) {
-    const cur = await this.get(key);
-    const next = (cur ? Number(cur) : 0) + 1;
+    const now = this.now();
     const e = this.store.get(key);
-    this.store.set(key, { value: String(next), expires: e && cur ? e.expires : this.now() + ttlSeconds * 1000 });
+    const live = e && e.expires > now ? e : null;
+    const next = (live ? Number(live.value) : 0) + 1;
+    this.put(key, String(next), live ? live.expires : now + ttlSeconds * 1000);
     return next;
+  }
+
+  /** Insert with capacity bound: drop expired entries first, then the oldest. */
+  private put(key: string, value: string, expires: number) {
+    if (!this.store.has(key) && this.store.size >= this.maxEntries) {
+      const now = this.now();
+      for (const [k, v] of this.store) if (v.expires <= now) this.store.delete(k);
+      if (this.store.size >= this.maxEntries) {
+        const oldest = this.store.keys().next().value;
+        if (oldest !== undefined) this.store.delete(oldest);
+      }
+    }
+    this.store.set(key, { value, expires });
   }
 }
 

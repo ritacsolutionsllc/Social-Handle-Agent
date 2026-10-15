@@ -109,6 +109,10 @@ export class CheckService {
     requireWriter(ctx);
     const check = await this.deps.uow.run(ctx.workspaceId, (r) => r.checks.get(id));
     if (!check) throw notFound('Check');
+    if (check.providerMode !== this.deps.checker.mode) {
+      // Mixing simulated and live results in one report would make its labels lie.
+      throw new DomainError('conflict', `This check used the ${check.providerMode} provider but the server now runs ${this.deps.checker.mode}. Run a new check instead.`, 409);
+    }
     const platform = (await this.deps.catalog.listEnabled()).find((p) => p.slug === platformSlug);
     const normalized = handle.toLowerCase().replace(/^@/, '');
     const belongs = check.platforms.includes(platformSlug) && check.candidates.some((c) => c.perPlatform[platformSlug]?.valid && c.perPlatform[platformSlug]?.handle === normalized);

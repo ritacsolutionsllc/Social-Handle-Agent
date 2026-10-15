@@ -1,5 +1,5 @@
 import type { FetchLike } from './types';
-import { withTimeout } from './util';
+import { readCapped, withTimeout } from './util';
 
 interface Rule {
   allow: boolean;
@@ -89,8 +89,11 @@ export class RobotsPolicy {
       const res = await this.fetchFn(`${origin}/robots.txt`, { signal: withTimeout(signal, 5000), headers: { 'user-agent': this.userAgentToken } });
       if (res.status >= 400 && res.status < 500) return 'allow_all';
       if (!res.ok) return 'disallow_all';
-      return parseRobots(await res.text());
-    } catch {
+      // RFC 9309 asks crawlers to parse at least 500 KiB; anything beyond is ignored.
+      return parseRobots(await readCapped(res, 500 * 1024));
+    } catch (err) {
+      // A caller cancellation says nothing about the site's policy: propagate it uncached.
+      if (signal.aborted) throw err;
       return 'disallow_all';
     }
   }

@@ -75,6 +75,8 @@ export interface JobRecord {
   email: string;
   status: JobStatus;
   attempts: number;
+  /** Compare-and-set token; bumped by cancel/retry so stale workers cannot overwrite newer attempts. */
+  generation: number;
   lastError: string | null;
   storeCredentials: boolean;
   nextAction: NextAction | null;
@@ -96,6 +98,7 @@ export interface NewJob {
 export interface JobPatch {
   status?: JobStatus;
   attempts?: number;
+  generation?: number;
   lastError?: string | null;
   nextAction?: NextAction | null;
 }
@@ -120,8 +123,17 @@ export interface WorkspaceRepos {
     get(id: string): Promise<JobRecord | null>;
     list(limit: number): Promise<JobRecord[]>;
     findActive(platform: string, handle: string): Promise<JobRecord | null>;
-    /** Optimistic: applies only if the job is still in `expectedStatus`. Returns null otherwise. */
-    update(id: string, expectedStatus: JobStatus, patch: JobPatch, event: { message: string; actorUserId: string | null }): Promise<JobRecord | null>;
+    /**
+     * Optimistic compare-and-set: applies only if the job is still in `expectedStatus`
+     * (and, when given, still at `expectedGeneration`). Returns null otherwise.
+     */
+    update(
+      id: string,
+      expectedStatus: JobStatus,
+      patch: JobPatch,
+      event: { message: string; actorUserId: string | null },
+      expectedGeneration?: number,
+    ): Promise<JobRecord | null>;
   };
   audit: { record(event: AuditEventInput): Promise<void> };
 }

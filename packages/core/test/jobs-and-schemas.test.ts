@@ -77,3 +77,19 @@ describe('resolveSessionSecret', () => {
     expect(() => resolveSessionSecret({ SESSION_SECRET: undefined, APP_ENV: 'production' })).toThrow(/required/);
   });
 });
+
+describe('settings hardening', () => {
+  const ok = { SESSION_SECRET: 'x'.repeat(40), AUTH_MODE: 'supabase', SUPABASE_URL: 'https://p.supabase.co', SUPABASE_ANON_KEY: 'k' };
+  it('rejects dev auth and missing secrets in staging', () => {
+    expect(() => loadSettings({ APP_ENV: 'staging', AUTH_MODE: 'dev', SESSION_SECRET: 'x'.repeat(40) })).toThrow(/AUTH_MODE=dev is not allowed in staging/);
+    expect(() => loadSettings({ ...ok, APP_ENV: 'staging', SESSION_SECRET: undefined })).toThrow(/SESSION_SECRET/);
+  });
+  it('requires complete https Supabase config for supabase auth', () => {
+    expect(() => loadSettings({ AUTH_MODE: 'supabase' })).toThrow(/requires SUPABASE_URL and SUPABASE_ANON_KEY/);
+    expect(() => loadSettings({ ...ok, APP_ENV: 'production', AVAILABILITY_PROVIDER_MODE: 'live', SUPABASE_URL: 'http://p.supabase.co' })).toThrow(/https/);
+    expect(loadSettings({ ...ok, APP_ENV: 'production', AVAILABILITY_PROVIDER_MODE: 'live' }).AUTH_MODE).toBe('supabase');
+  });
+  it('accepts every generated candidate length in API handles', () => {
+    expect(CheckRequestSchema.safeParse({ input: 'a', requestedHandle: 'a'.repeat(108) }).success).toBe(true);
+  });
+});

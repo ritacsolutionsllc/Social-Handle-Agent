@@ -39,7 +39,16 @@ export function JobsView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(() => api<{ jobs: JobRecord[] }>('/api/creation-jobs').then((r) => setJobs(r.jobs)).catch((e) => setError(isApiError(e) ? e.message : 'Could not load jobs.')), []);
+  const load = useCallback(
+    () =>
+      api<{ jobs: JobRecord[] }>('/api/creation-jobs')
+        .then((r) => {
+          setJobs(r.jobs);
+          setError(null);
+        })
+        .catch((e) => setError(isApiError(e) ? e.message : 'Could not load jobs.')),
+    [],
+  );
 
   useEffect(() => {
     void load();
@@ -65,7 +74,16 @@ export function JobsView() {
     }
   }
 
-  if (!jobs) return error ? <Alert tone="error">{error}</Alert> : <p className="text-sm text-slate-500">Loading jobs…</p>;
+  if (!jobs) {
+    return error ? (
+      <div className="space-y-3">
+        <Alert tone="error">{error}</Alert>
+        <Button variant="secondary" onClick={() => void load()}>Try again</Button>
+      </div>
+    ) : (
+      <p className="text-sm text-slate-500">Loading jobs…</p>
+    );
+  }
 
   return (
     <div className="space-y-6">

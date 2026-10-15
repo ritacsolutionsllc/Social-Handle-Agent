@@ -48,6 +48,7 @@ export class Semaphore {
   constructor(private readonly max: number) {}
 
   async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) throw signal.reason ?? new Error('aborted');
     if (this.active < this.max) {
       this.active++;
       return () => this.release();
@@ -66,13 +67,14 @@ export class Semaphore {
       signal?.addEventListener('abort', onAbort, { once: true });
       this.waiters.push(go);
     });
-    this.active++;
+    // The permit was handed over by release() without decrementing `active`.
     return () => this.release();
   }
 
   private release() {
-    this.active--;
-    this.waiters.shift()?.();
+    const next = this.waiters.shift();
+    if (next) next(); // hand the permit straight to the waiter; `active` is unchanged
+    else this.active--;
   }
 }
 

@@ -18,13 +18,22 @@ export function PlanView({ checkId, handle, platforms }: { checkId: string; hand
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // New inputs invalidate the previous plan and every confirmation made against it.
+    setPlan(null);
+    setConfirmed([]);
+    setAck(false);
+    setError(null);
     if (!handle || platforms.length === 0) {
       setError({ code: 'validation_error', message: 'Select a handle and at least one platform on the report first.', status: 400 });
       return;
     }
+    let current = true; // ignore responses for superseded inputs
     api<CreationPlan>('/api/creation-plans', { body: { checkId, handle, platforms } })
-      .then(setPlan)
-      .catch((e) => setError(isApiError(e) ? e : { code: 'internal_error', message: 'Could not build the plan.', status: 500 }));
+      .then((p) => current && setPlan(p))
+      .catch((e) => current && setError(isApiError(e) ? e : { code: 'internal_error', message: 'Could not build the plan.', status: 500 }));
+    return () => {
+      current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkId, handle, platforms.join(',')]);
 

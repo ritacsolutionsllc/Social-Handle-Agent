@@ -164,7 +164,12 @@ export class YouTubeAvailabilityAdapter extends LiveAdapter {
     const out = await probe(this.deps, `https://www.youtube.com/@${encodeURIComponent(handle)}`, signal, p.rateLimitPolicy.timeoutMs);
     const nd = interpretNonDefinitive(p, handle, this.now, source, out);
     if (nd || out.kind !== 'response') return nd!;
-    if (out.status === 200) return makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source, evidence: 'Public channel page exists (HTTP 200).' });
+    if (out.status === 200) {
+      const isChannel = /"channelId"\s*:\s*"UC[\w-]{10,}"|<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\//.test(out.body);
+      return isChannel
+        ? makeResult(p, handle, this.now, { status: 'taken', confidence: 'medium', source, evidence: 'Public channel page with a channel ID exists (HTTP 200).' })
+        : unknownResult(p, handle, this.now, source, 'ambiguous_response', 'HTTP 200 without channel markers (consent, login or error page); not proof of a channel.');
+    }
     if (out.status === 404) {
       return makeResult(p, handle, this.now, {
         status: 'available',
@@ -207,6 +212,7 @@ export class RedditAvailabilityAdapter extends LiveAdapter {
     const ua = this.deps.credentials('REDDIT_USER_AGENT');
     if (!id || !secret || !ua) return missingCredentials(p, handle, this.now, this.source, ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'REDDIT_USER_AGENT']);
     const token = await this.getToken(id, secret, ua, signal, p.rateLimitPolicy.timeoutMs);
+    if (token instanceof Response) return rateLimited(p, handle, this.now, this.source, token);
     if (!token) return makeResult(p, handle, this.now, { status: 'error', confidence: 'low', source: this.source, reason: 'upstream_error', error: 'Reddit OAuth token request failed.' });
     const res = await this.deps.fetch(`https://oauth.reddit.com/api/username_available?user=${encodeURIComponent(handle)}`, {
       signal: withTimeout(signal, p.rateLimitPolicy.timeoutMs),
@@ -221,7 +227,8 @@ export class RedditAvailabilityAdapter extends LiveAdapter {
     return unknownResult(p, handle, this.now, this.source, 'ambiguous_response', 'Unexpected API body.');
   }
 
-  private async getToken(id: string, secret: string, ua: string, signal: AbortSignal, timeoutMs: number): Promise<string | null> {
+  /** Returns the token, the 429 response when throttled, or null on other failures. */
+  private async getToken(id: string, secret: string, ua: string, signal: AbortSignal, timeoutMs: number): Promise<string | Response | null> {
     if (this.token && this.token.expires > this.now.getTime() + 60_000) return this.token.value;
     const res = await this.deps.fetch('https://www.reddit.com/api/v1/access_token', {
       method: 'POST',
@@ -233,6 +240,7 @@ export class RedditAvailabilityAdapter extends LiveAdapter {
       },
       body: 'grant_type=client_credentials',
     });
+    if (res.status === 429) return res;
     if (!res.ok) return null;
     const body = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
     if (!body.access_token) return null;

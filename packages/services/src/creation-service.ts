@@ -1,5 +1,4 @@
 import {
-  assertTransition,
   AVAILABILITY_DISCLAIMER,
   DomainError,
   isCancellable,
@@ -165,9 +164,24 @@ export class CreationService {
     if (!jobs) {
       throw new DomainError('handle_unavailable', 'The handle was re-checked and now appears taken.', 409, nowTaken.map((r) => ({ platform: r.platform, reason: r.evidence ?? 'taken' })));
     }
-    // Enqueue only after the transaction committed (no phantom jobs).
-    for (const j of jobs) await this.deps.dispatcher.enqueue({ workspaceId: ctx.workspaceId, jobId: j.id });
-    return jobs;
+    // Enqueue only after the transaction committed (no phantom jobs). A job that cannot be
+    // dispatched is marked failed so it is visible and recoverable with Retry.
+    const out: JobRecord[] = [];
+    for (const j of jobs) out.push(await this.dispatchOrFail(ctx, j));
+    return out;
+  }
+
+  private async dispatchOrFail(ctx: AuthContext, job: JobRecord): Promise<JobRecord> {
+    try {
+      await this.deps.dispatcher.enqueue({ workspaceId: ctx.workspaceId, jobId: job.id });
+      return job;
+    } catch (err) {
+      this.deps.logger.error('job.dispatch_failed', { jobId: job.id, requestId: ctx.requestId, error: err instanceof Error ? err.message : 'unknown' });
+      const failed = await this.deps.uow.run(ctx.workspaceId, (r) =>
+        r.jobs.update(job.id, 'queued', { status: 'failed', lastError: 'Could not dispatch the job. Use Retry.' }, { message: 'Dispatch to the job queue failed.', actorUserId: null }, job.generation),
+      );
+      return failed ?? job;
+    }
   }
 
   async getJob(ctx: AuthContext, id: string): Promise<JobRecord> {
@@ -186,7 +200,8 @@ export class CreationService {
       const job = await r.jobs.get(id);
       if (!job) throw notFound('Job');
       if (!isCancellable(job.status)) throw new DomainError('invalid_transition', `A ${job.status} job cannot be cancelled.`, 409);
-      const updated = await r.jobs.update(id, job.status, { status: 'cancelled' }, { message: 'Cancelled by user.', actorUserId: ctx.userId });
+      // Bumping the generation makes any in-flight worker's later updates no-ops.
+      const updated = await r.jobs.update(id, job.status, { status: 'cancelled', generation: job.generation + 1 }, { message: 'Cancelled by user.', actorUserId: ctx.userId }, job.generation);
       if (!updated) throw new DomainError('conflict', 'The job changed concurrently; refresh and try again.', 409);
       await r.audit.record({ actorUserId: ctx.userId, action: 'creation_job.cancelled', entityType: 'account_creation_job', entityId: id });
       return updated;
@@ -201,13 +216,19 @@ export class CreationService {
       if (!job) throw notFound('Job');
       if (!isRetryable(job.status)) throw new DomainError('invalid_transition', `A ${job.status} job cannot be retried.`, 409);
       if (await r.jobs.findActive(job.platform, job.handle)) throw new DomainError('conflict', 'Another active job exists for this handle.', 409);
-      const u = await r.jobs.update(id, job.status, { status: 'queued', lastError: null, nextAction: null }, { message: 'Retried by user.', actorUserId: ctx.userId });
+      // Fresh attempt budget and a new generation for the new attempt.
+      const u = await r.jobs.update(
+        id,
+        job.status,
+        { status: 'queued', attempts: 0, generation: job.generation + 1, lastError: null, nextAction: null },
+        { message: 'Retried by user.', actorUserId: ctx.userId },
+        job.generation,
+      );
       if (!u) throw new DomainError('conflict', 'The job changed concurrently; refresh and try again.', 409);
       await r.audit.record({ actorUserId: ctx.userId, action: 'creation_job.retried', entityType: 'account_creation_job', entityId: id });
       return u;
     });
-    await this.deps.dispatcher.enqueue({ workspaceId: ctx.workspaceId, jobId: id });
-    return updated;
+    return this.dispatchOrFail(ctx, updated);
   }
 
   /**
@@ -217,7 +238,10 @@ export class CreationService {
   async confirmCompleted(ctx: AuthContext, id: string): Promise<JobRecord> {
     requireWriter(ctx);
     const job = await this.getJob(ctx, id);
-    assertTransition(job.status, 'succeeded');
+    // Only a job waiting on the human can be confirmed; running -> succeeded is reserved for adapters.
+    if (job.status !== 'awaiting_verification') {
+      throw new DomainError('invalid_transition', `Only jobs awaiting verification can be confirmed (this one is ${job.status}).`, 409);
+    }
     const platform = (await this.deps.catalog.listEnabled()).find((p) => p.slug === job.platform);
     if (!platform) throw new DomainError('validation_error', 'Platform is disabled.', 400);
     const r = await this.deps.checker.checkOne({ platform, handle: job.handle }, { signal: AbortSignal.timeout(this.deps.settings.CHECK_DEADLINE_MS), bypassCache: true });
@@ -230,7 +254,7 @@ export class CreationService {
         : `Confirmed by user; automated verification not possible (${r.status}).`;
     return this.deps.uow.run(ctx.workspaceId, async (repos) => {
       await repos.observations.append([r]);
-      const updated = await repos.jobs.update(id, job.status, { status: 'succeeded' }, { message, actorUserId: ctx.userId });
+      const updated = await repos.jobs.update(id, job.status, { status: 'succeeded' }, { message, actorUserId: ctx.userId }, job.generation);
       if (!updated) throw new DomainError('conflict', 'The job changed concurrently; refresh and try again.', 409);
       await repos.audit.record({ actorUserId: ctx.userId, action: 'creation_job.confirmed', entityType: 'account_creation_job', entityId: id, metadata: { verification: r.status, source: r.source } });
       return updated;

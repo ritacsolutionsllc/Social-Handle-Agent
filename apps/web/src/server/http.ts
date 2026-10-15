@@ -21,6 +21,11 @@ export const CHECK_LIMITS: Limit[] = [
   { name: 'check', max: 40, windowSeconds: 60, by: 'ip' },
 ];
 export const AUTH_LIMITS: Limit[] = [{ name: 'auth', max: 10, windowSeconds: 60, by: 'ip' }];
+/** Each creation request can trigger up to 20 cache-bypassing availability checks. */
+export const CREATION_LIMITS: Limit[] = [
+  { name: 'creation', max: 5, windowSeconds: 60, by: 'user' },
+  { name: 'creation', max: 15, windowSeconds: 60, by: 'workspace' },
+];
 
 export interface HandlerCtx<P> {
   req: NextRequest;
@@ -36,9 +41,20 @@ interface Options {
   limits?: Limit[];
 }
 
+/**
+ * Client IP for rate limiting. X-Forwarded-For is client-controlled except for the entries
+ * appended by our own proxies, so with TRUSTED_PROXY_HOPS=N we take the Nth entry from the
+ * right. With 0 (no proxy configured) the header is ignored and IP limits share one bucket;
+ * per-user and per-workspace limits still apply.
+ */
 function clientIp(req: NextRequest): string {
-  // Behind a trusted proxy (Vercel/Fly/nginx) the left-most X-Forwarded-For is the client.
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'local';
+  const hops = runtime().settings.TRUSTED_PROXY_HOPS;
+  if (hops > 0) {
+    const parts = (req.headers.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const ip = parts[parts.length - hops];
+    if (ip) return ip.slice(0, 64);
+  }
+  return 'direct';
 }
 
 function json(body: unknown, status: number, requestId: string, extra: Record<string, string> = {}) {
@@ -90,12 +106,32 @@ async function enforceLimits(limits: Limit[], ip: string, session: Session | nul
   }
 }
 
+const MAX_BODY_BYTES = 16_384;
+
+/** Read and parse a JSON body, enforcing the size cap while streaming (Content-Length is optional/untrusted). */
 export async function parseJson<S extends z.ZodType>(req: NextRequest, schema: S): Promise<z.infer<S>> {
-  const len = Number(req.headers.get('content-length') ?? 0);
-  if (len > 16_384) throw new DomainError('validation_error', 'Request body too large.', 413);
-  const body: unknown = await req.json().catch(() => {
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) throw new DomainError('validation_error', 'Request body too large.', 413);
+  const reader = req.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (reader) {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new DomainError('validation_error', 'Request body too large.', 413);
+      }
+      chunks.push(value);
+    }
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+  } catch {
     throw new DomainError('validation_error', 'Body must be valid JSON.', 400);
-  });
+  }
   return schema.parse(body);
 }
 

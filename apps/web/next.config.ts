@@ -16,7 +16,8 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
-  `connect-src 'self'${process.env.SUPABASE_URL ? ` ${process.env.SUPABASE_URL}` : ''}`,
+  // headers() is evaluated at build time: always allow Supabase-hosted projects, plus a custom SUPABASE_URL if known.
+  `connect-src 'self' https://*.supabase.co${process.env.SUPABASE_URL ? ` ${process.env.SUPABASE_URL}` : ''}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

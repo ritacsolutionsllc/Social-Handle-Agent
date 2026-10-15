@@ -37,7 +37,6 @@ export function rankCandidates(candidates: Candidate[], resultsFor: (c: Candidat
   return ranked.sort(
     (a, b) =>
       b.availableCount - a.availableCount ||
-      a.takenCount - b.takenCount ||
       b.weightedAvailability - a.weightedAvailability ||
       a.length - b.length ||
       a.digitCount - b.digitCount ||

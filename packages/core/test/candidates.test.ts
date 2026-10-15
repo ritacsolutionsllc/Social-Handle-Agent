@@ -40,3 +40,10 @@ describe('generateCandidates', () => {
     expect(generateCandidates({ input: '!!!', now })).toEqual([]);
   });
 });
+
+describe('generateCandidates guards', () => {
+  it('rejects primaries without letters or digits', () => {
+    expect(generateCandidates({ input: '...', now })).toEqual([]);
+    expect(generateCandidates({ input: 'Acme', requestedHandle: '._-', now })[0]?.handle).not.toBe('.');
+  });
+});

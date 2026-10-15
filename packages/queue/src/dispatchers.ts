@@ -1,12 +1,15 @@
 import { Queue, type ConnectionOptions } from 'bullmq';
 import type { Logger } from '@sha/platforms';
-import { RetryableJobError, type JobDispatcher, type JobRef } from '@sha/services';
+import type { JobDispatcher, JobRef } from '@sha/services';
 
 export const CREATION_QUEUE = 'account-creation';
 
 /**
- * Durable dispatcher. The DB row is the source of truth; the BullMQ job only
- * carries the reference. jobId = DB job id dedupes concurrent enqueues.
+ * Durable dispatcher. The DB row is the source of truth; the BullMQ job only carries
+ * the reference. Each enqueue is its own delivery (BullMQ-generated id): reusing the DB
+ * id would let a retry be silently deduplicated against a stale in-flight delivery.
+ * Duplicate deliveries are harmless because the processor compare-and-sets on
+ * (status, generation).
  */
 export class BullMqDispatcher implements JobDispatcher {
   private readonly queue: Queue<JobRef>;
@@ -17,7 +20,6 @@ export class BullMqDispatcher implements JobDispatcher {
   }
   async enqueue(ref: JobRef) {
     await this.queue.add('create', ref, {
-      jobId: ref.jobId,
       attempts: this.attempts,
       backoff: { type: 'exponential', delay: 2_000 },
       removeOnComplete: true,
@@ -59,7 +61,9 @@ export class InlineDispatcher implements JobDispatcher {
       await new Promise((r) => setImmediate(r));
       await this.process!(ref);
     } catch (err) {
-      if (err instanceof RetryableJobError && attempt < this.attempts) {
+      // Retry within budget whether the processor asked to (RetryableJobError) or failed
+      // unexpectedly (e.g. a transient DB error before it could requeue); it is idempotent.
+      if (attempt < this.attempts) {
         await new Promise((r) => setTimeout(r, this.baseDelayMs * 2 ** (attempt - 1)));
         return this.run(ref, attempt + 1);
       }
