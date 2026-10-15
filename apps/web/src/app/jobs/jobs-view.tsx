@@ -15,15 +15,21 @@ const TONE: Record<JobStatus, 'slate' | 'indigo' | 'amber' | 'green' | 'red'> = 
 const ACTIVE: JobStatus[] = ['queued', 'running'];
 
 function Copy({ value, label }: { value: string; label: string }) {
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copy = () =>
+    navigator.clipboard
+      .writeText(value)
+      .then(() => setState('copied'))
+      .catch(() => setState('failed')) // permission denied or insecure context
+      .finally(() => setTimeout(() => setState('idle'), 1500));
   return (
     <button
       type="button"
       className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs hover:bg-slate-200"
-      onClick={() => void navigator.clipboard.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); })}
+      onClick={() => void copy()}
       title={`Copy ${label}`}
     >
-      {done ? 'Copied' : value}
+      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed — select manually' : value}
     </button>
   );
 }

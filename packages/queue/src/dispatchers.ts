@@ -10,8 +10,10 @@ export const CREATION_QUEUE = 'account-creation';
  */
 export class BullMqDispatcher implements JobDispatcher {
   private readonly queue: Queue<JobRef>;
-  constructor(connection: ConnectionOptions, private readonly attempts: number) {
+  constructor(connection: ConnectionOptions, private readonly attempts: number, logger: Logger) {
     this.queue = new Queue<JobRef>(CREATION_QUEUE, { connection });
+    // An 'error' event with no listener would crash the process (EventEmitter semantics).
+    this.queue.on('error', (err) => logger.error('queue.error', { error: err.message }));
   }
   async enqueue(ref: JobRef) {
     await this.queue.add('create', ref, {

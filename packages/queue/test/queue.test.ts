@@ -39,7 +39,7 @@ describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
       uow: { run: async (_ws: string, fn: (r: unknown) => Promise<unknown>) => fn({ jobs: { get: async (id: string) => { seen.push(id); return null; } } }) },
     } as unknown as ServiceDeps;
     const worker = startCreationWorker(deps, conn, 1);
-    const dispatcher = new BullMqDispatcher(conn, 3);
+    const dispatcher = new BullMqDispatcher(conn, 3, silent);
     await dispatcher.enqueue({ workspaceId: 'w', jobId: 'job-a' });
     await dispatcher.enqueue({ workspaceId: 'w', jobId: 'job-a' }); // deduped while pending
     const deadline = Date.now() + 5000;
@@ -55,5 +55,20 @@ describe.skipIf(!redisUrl)('BullMQ round-trip (TEST_REDIS_URL)', () => {
 describe('InlineDispatcher misuse', () => {
   it('rejects enqueue before bind() in the caller instead of an unhandled rejection', async () => {
     await expect(new InlineDispatcher(silent).enqueue({ workspaceId: 'w', jobId: 'j' })).rejects.toThrow(/before bind/);
+  });
+});
+
+describe('BullMqDispatcher error handling', () => {
+  it('logs queue errors instead of crashing the process', async () => {
+    const conn = new Redis('redis://127.0.0.1:1', { lazyConnect: true, maxRetriesPerRequest: null, retryStrategy: () => null });
+    conn.on('error', () => {});
+    const errors: string[] = [];
+    const logger = { info() {}, warn() {}, error: (msg: string) => void errors.push(msg) };
+    const d = new BullMqDispatcher(conn, 3, logger);
+    const { queue } = d as unknown as { queue: { emit(e: string, err: Error): boolean } };
+    expect(() => queue.emit('error', new Error('connection lost'))).not.toThrow();
+    expect(errors).toContain('queue.error');
+    await d.close().catch(() => {});
+    conn.disconnect();
   });
 });

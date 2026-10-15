@@ -15,9 +15,16 @@ rt.deps.logger.info('worker.started', { queue: 'account-creation', accountCreati
 
 const shutdown = async (signal: string) => {
   rt.deps.logger.info('worker.stopping', { signal });
-  await worker.close();
-  await rt.close();
-  process.exit(0);
+  let code = 0;
+  try {
+    await worker.close();
+    await rt.close();
+  } catch (err) {
+    code = 1;
+    rt.deps.logger.error('worker.shutdown_failed', { error: err instanceof Error ? err.message : 'unknown' });
+  } finally {
+    process.exit(code);
+  }
 };
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

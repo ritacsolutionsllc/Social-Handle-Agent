@@ -41,6 +41,8 @@ export function createRuntime(env: Record<string, string | undefined> = process.
   const db = createDb(settings.DATABASE_URL);
   const needsRedis = settings.CACHE_DRIVER === 'redis' || settings.QUEUE_DRIVER === 'bullmq';
   const redis = needsRedis ? new Redis(settings.REDIS_URL!, { maxRetriesPerRequest: null }) : null;
+  // ioredis reconnects on its own; without a listener connection errors surface as unhandled 'error' events.
+  redis?.on('error', (err) => logger.error('redis.error', { error: err.message }));
   const cache: KeyValueCache = settings.CACHE_DRIVER === 'redis' ? new RedisCache(redis!) : new MemoryCache();
   const catalog = createPlatformCatalog(db.db);
 
@@ -66,7 +68,7 @@ export function createRuntime(env: Record<string, string | undefined> = process.
   let dispatcher: JobDispatcher;
   let inline: InlineDispatcher | null = null;
   if (settings.QUEUE_DRIVER === 'bullmq') {
-    dispatcher = new BullMqDispatcher(redis!, MAX_JOB_ATTEMPTS);
+    dispatcher = new BullMqDispatcher(redis!, MAX_JOB_ATTEMPTS, logger);
   } else {
     inline = new InlineDispatcher(logger, MAX_JOB_ATTEMPTS);
     dispatcher = inline;

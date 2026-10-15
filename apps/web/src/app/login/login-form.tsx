@@ -13,12 +13,15 @@ export function LoginForm({ mode, supabaseUrl, supabaseAnonKey }: { mode: 'dev' 
   // Supabase magic-link return: exchange the verified access token for an app session.
   useEffect(() => {
     if (!supabase) return;
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session) return;
-      await api('/api/auth/session', { body: { accessToken: data.session.access_token } });
-      await supabase.auth.signOut({ scope: 'local' });
-      window.location.href = '/';
-    });
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!data.session) return;
+        await api('/api/auth/session', { body: { accessToken: data.session.access_token } });
+        await supabase.auth.signOut({ scope: 'local' });
+        window.location.href = '/';
+      })
+      .catch((err: unknown) => setMsg({ tone: 'error', text: isApiError(err) ? err.message : 'Could not complete sign-in. Request a new link.' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
