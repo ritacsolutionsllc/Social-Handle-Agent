@@ -24,7 +24,13 @@ export function startCreationWorker(deps: ServiceDeps, connection: Redis, concur
       const out = await processCreationJob(deps, ref, AbortSignal.timeout(60_000));
       const leaseEnd = leaseExpiresAt(out);
       if (leaseEnd !== null) {
-        await job.moveToDelayed(Math.max(leaseEnd, Date.now()) + LEASE_GRACE_MS, token);
+        try {
+          await job.moveToDelayed(Math.max(leaseEnd, Date.now()) + LEASE_GRACE_MS, token);
+        } catch (err) {
+          // Redis unavailable or lock lost: rethrow so BullMQ counts a failed attempt and retries with backoff.
+          deps.logger.warn('job.defer_failed', { jobId: ref.jobId, error: err instanceof Error ? err.message : 'unknown' });
+          throw err;
+        }
         deps.logger.info('job.deferred_until_lease_expiry', { jobId: ref.jobId });
         throw new DelayedError();
       }
