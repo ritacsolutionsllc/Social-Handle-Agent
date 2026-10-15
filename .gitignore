@@ -14,3 +14,6 @@ test-results/
 # Local tooling state (plugins/agents); never commit
 .cto-toolkit/
 .claude/settings.local.json
+# Redis snapshots written when redis-server runs in this directory
+dump.rdb
+*.rdb
