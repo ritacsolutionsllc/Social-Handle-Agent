@@ -10,3 +10,7 @@ test-results/
 .env
 .env.*
 !.env.example
+
+# Local tooling state (plugins/agents); never commit
+.cto-toolkit/
+.claude/settings.local.json
